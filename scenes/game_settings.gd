@@ -6,6 +6,8 @@ extends RefCounted
 enum Mode { HOTSEAT, VS_AI }
 
 const SETTINGS_FILE := "user://settings.cfg"
+## Bumped when the default look changes (see load_saved).
+const LOOK_VERSION := 2
 ## Folders scanned for extra piece sets (.tres PieceSet resources, .glb models).
 const PIECE_SET_DIRS := ["res://piece_sets", "user://piece_sets"]
 
@@ -15,9 +17,12 @@ static var human_color: int = Piece.WHITE
 ## 0 = Easy, 1 = Medium, 2 = Hard.
 static var ai_level: int = 1
 ## One of MaterialPresets.Preset.
-static var material_preset: int = MaterialPresets.Preset.CLASSIC_WOOD
-## Path of the piece set to use (.tres PieceSet or .glb); "" = procedural.
-static var piece_set_path: String = ""
+static var material_preset: int = MaterialPresets.Preset.ANTIQUE_METAL
+## Path of the piece set to use (.tres PieceSet or .glb); "" = the classic
+## procedural set, PieceSet.BUILTIN_MEDIEVAL = the sculpted medieval set.
+static var piece_set_path: String = PieceSet.BUILTIN_MEDIEVAL
+## Sound effects (generated in code, see Sfx).
+static var sound: bool = true
 ## Hot-seat: swing the camera to the other side after every move.
 static var auto_rotate_camera: bool = true
 ## Turn off to make moves instant (also used by the tests).
@@ -47,7 +52,10 @@ static func make_piece_set() -> PieceSet:
 ## [{"name": ..., "path": ...}] for the built-in set plus everything found in
 ## PIECE_SET_DIRS.
 static func available_piece_sets() -> Array[Dictionary]:
-	var out: Array[Dictionary] = [{"name": "Procedural (built-in)", "path": ""}]
+	var out: Array[Dictionary] = [
+		{"name": "Classic (built-in)", "path": ""},
+		{"name": "Medieval (built-in)", "path": PieceSet.BUILTIN_MEDIEVAL},
+	]
 	for dir_path: String in PIECE_SET_DIRS:
 		var dir := DirAccess.open(dir_path)
 		if dir == null:
@@ -71,6 +79,8 @@ static func save() -> void:
 	cfg.set_value("game", "human_color", human_color)
 	cfg.set_value("game", "ai_level", ai_level)
 	cfg.set_value("game", "auto_rotate_camera", auto_rotate_camera)
+	cfg.set_value("game", "sound", sound)
+	cfg.set_value("look", "version", LOOK_VERSION)
 	cfg.set_value("look", "material_preset", material_preset)
 	cfg.set_value("look", "piece_set_path", piece_set_path)
 	cfg.set_value("engine", "stockfish_path", stockfish_path)
@@ -87,4 +97,10 @@ static func load_saved() -> void:
 	auto_rotate_camera = bool(cfg.get_value("game", "auto_rotate_camera", true))
 	material_preset = clampi(cfg.get_value("look", "material_preset", 0), 0, MaterialPresets.preset_count() - 1)
 	piece_set_path = str(cfg.get_value("look", "piece_set_path", ""))
+	sound = bool(cfg.get_value("game", "sound", true))
+	# Settings saved before the medieval set existed: switch to the new look
+	# once (it can be changed back in the menu).
+	if int(cfg.get_value("look", "version", 1)) < LOOK_VERSION and piece_set_path == "":
+		piece_set_path = PieceSet.BUILTIN_MEDIEVAL
+		material_preset = MaterialPresets.Preset.ANTIQUE_METAL
 	stockfish_path = str(cfg.get_value("engine", "stockfish_path", ""))

@@ -8,7 +8,13 @@ extends Resource
 ## centered on the origin, facing +Z, and fit a 1 x 1 square (use
 ## `model_scale` / `model_rotation_degrees` to adapt external models).
 
+## Path that selects the built-in medieval set (see `load_from`).
+const BUILTIN_MEDIEVAL := "builtin:medieval"
+
 @export var display_name: String = "Procedural"
+## Which built-in look fills the empty slots: 0 = classic turned pieces,
+## 1 = sculpted medieval figures (ProceduralPieceFactory.STYLE_*).
+@export_enum("Classic", "Medieval") var procedural_style: int = 0
 
 @export_group("Models (Mesh or PackedScene; empty = procedural)")
 @export var pawn: Resource
@@ -37,6 +43,15 @@ extends Resource
 static func procedural(preset: int = MaterialPresets.Preset.CLASSIC_WOOD) -> PieceSet:
 	var piece_set := PieceSet.new()
 	piece_set.display_name = "Procedural"
+	piece_set.use_preset(preset)
+	return piece_set
+
+
+## The built-in sculpted medieval set.
+static func medieval(preset: int = MaterialPresets.Preset.ANTIQUE_METAL) -> PieceSet:
+	var piece_set := PieceSet.new()
+	piece_set.display_name = "Medieval"
+	piece_set.procedural_style = ProceduralPieceFactory.STYLE_MEDIEVAL
 	piece_set.use_preset(preset)
 	return piece_set
 
@@ -85,7 +100,8 @@ func instantiate(piece: int) -> Node3D:
 			node.add_child(model)
 	if node == null:
 		var mi := MeshInstance3D.new()
-		mi.mesh = (source as Mesh) if source is Mesh else ProceduralPieceFactory.build_mesh(type)
+		mi.mesh = (source as Mesh) if source is Mesh else ProceduralPieceFactory.build_mesh(
+				type, ProceduralPieceFactory.DEFAULT_SEGMENTS, procedural_style)
 		node = mi
 
 	node.scale = Vector3.ONE * model_scale
@@ -126,6 +142,8 @@ func _apply_materials(node: Node, color: int) -> void:
 ## Loads a piece set from a PieceSet resource (.tres / .res) or straight from
 ## a glTF file (.glb / .gltf). Returns null if it can't be loaded.
 static func load_from(path: String) -> PieceSet:
+	if path == BUILTIN_MEDIEVAL:
+		return medieval()
 	var ext := path.get_extension().to_lower()
 	if ext == "glb" or ext == "gltf":
 		return from_glb(path)

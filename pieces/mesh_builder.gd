@@ -247,6 +247,126 @@ func add_beveled_extrusion(outline: PackedVector2Array, depth: float, bevel: flo
 				bi, bj, bj, bi)
 
 
+# ---------------------------------------------------------- sculpted bits ---
+
+## Ball stretched to `radii` along its own axes; `basis` rotates it.
+func add_ellipsoid(center: Vector3, radii: Vector3, segments: int = 12, rings: int = 6,
+		basis: Basis = Basis.IDENTITY) -> void:
+	var ball := MeshBuilder.new()
+	ball.add_ball(Vector3.ZERO, 1.0, segments, rings)
+	ball.transform(Transform3D(basis * Basis.from_scale(radii), center))
+	append(ball)
+
+
+## Capped cone / cylinder from `a` (radius ra) to `b` (radius rb).
+func add_cone(a: Vector3, b: Vector3, ra: float, rb: float, segments: int = 10) -> void:
+	var length := a.distance_to(b)
+	if length < 1e-6:
+		return
+	var profile := PackedVector2Array([Vector2(0.0, 0.0), Vector2(ra, 0.0)])
+	if rb > 1e-5:
+		profile.append(Vector2(rb, length))
+	profile.append(Vector2(0.0, length))
+	var cone := MeshBuilder.new()
+	cone.add_lathe(profile, segments)
+	cone.transform(Transform3D(basis_from_y((b - a) / length), a))
+	append(cone)
+
+
+## Lathe squashed front-to-back (and optionally sideways), for robes and hats.
+func add_squashed_lathe(profile: PackedVector2Array, segments: int, z_scale: float,
+		x_scale: float = 1.0, offset: Vector3 = Vector3.ZERO) -> void:
+	var part := MeshBuilder.new()
+	part.add_lathe(profile, segments)
+	part.transform(Transform3D(Basis.from_scale(Vector3(x_scale, 1.0, z_scale)), offset))
+	append(part)
+
+
+## Torus around the Y axis at height `y`: ring radius `ring_r`, tube radius
+## `tube_r`.
+func add_torus(y: float, ring_r: float, tube_r: float, segments: int, tube_steps: int = 8,
+		xf: Transform3D = Transform3D.IDENTITY) -> void:
+	var part := MeshBuilder.new()
+	for k in tube_steps:
+		var t0 := TAU * k / tube_steps
+		var t1 := TAU * (k + 1) / tube_steps
+		var n0 := Vector2(cos(t0), sin(t0))
+		var n1 := Vector2(cos(t1), sin(t1))
+		for j in segments:
+			var a0 := TAU * j / segments
+			var a1 := TAU * (j + 1) / segments
+			var d0 := Vector3(cos(a0), 0.0, sin(a0))
+			var d1 := Vector3(cos(a1), 0.0, sin(a1))
+			part.add_quad(
+				d0 * (ring_r + n0.x * tube_r) + Vector3.UP * (y + n0.y * tube_r),
+				d1 * (ring_r + n0.x * tube_r) + Vector3.UP * (y + n0.y * tube_r),
+				d1 * (ring_r + n1.x * tube_r) + Vector3.UP * (y + n1.y * tube_r),
+				d0 * (ring_r + n1.x * tube_r) + Vector3.UP * (y + n1.y * tube_r),
+				d0 * n0.x + Vector3.UP * n0.y, d1 * n0.x + Vector3.UP * n0.y,
+				d1 * n1.x + Vector3.UP * n1.y, d0 * n1.x + Vector3.UP * n1.y)
+	part.transform(xf)
+	append(part)
+
+
+## Smooth tube with elliptical cross-sections along a path (a horse's neck,
+## an arm, a crook). `radii[i]` is (across, along-the-bend): the first radius
+## lies along `side`, the second is perpendicular to both `side` and the path.
+## Both ends are capped.
+func add_loft(centers: PackedVector3Array, radii: PackedVector2Array, segments: int,
+		side: Vector3 = Vector3.RIGHT) -> void:
+	var count := centers.size()
+	if count < 2 or radii.size() != count:
+		return
+	var rings: Array[PackedVector3Array] = []
+	var tangents := PackedVector3Array()
+	for i in count:
+		var t := (centers[mini(i + 1, count - 1)] - centers[maxi(i - 1, 0)]).normalized()
+		var u := (side - t * side.dot(t)).normalized()
+		var v := t.cross(u)
+		var ring := PackedVector3Array()
+		for j in segments:
+			var a := TAU * j / segments
+			ring.append(centers[i] + u * (cos(a) * radii[i].x) + v * (sin(a) * radii[i].y))
+		rings.append(ring)
+		tangents.append(t)
+
+	# Normals from the grid itself, pointed away from the path.
+	var normals: Array[PackedVector3Array] = []
+	for i in count:
+		var ring_n := PackedVector3Array()
+		for j in segments:
+			var around := rings[i][(j + 1) % segments] - rings[i][(j - 1 + segments) % segments]
+			var along := rings[mini(i + 1, count - 1)][j] - rings[maxi(i - 1, 0)][j]
+			var n := around.cross(along).normalized()
+			var out := rings[i][j] - centers[i]
+			if n == Vector3.ZERO:
+				n = out.normalized()
+			elif n.dot(out) < 0.0:
+				n = -n
+			ring_n.append(n)
+		normals.append(ring_n)
+
+	for i in count - 1:
+		for j in segments:
+			var k := (j + 1) % segments
+			add_quad(rings[i][j], rings[i][k], rings[i + 1][k], rings[i + 1][j],
+					normals[i][j], normals[i][k], normals[i + 1][k], normals[i + 1][j])
+	for end: int in [0, count - 1]:
+		var cap_n := -tangents[end] if end == 0 else tangents[end]
+		for j in segments:
+			add_tri(centers[end], rings[end][j], rings[end][(j + 1) % segments], cap_n, cap_n, cap_n)
+
+
+## A rotation that takes the Y axis to `dir` (unit length).
+static func basis_from_y(dir: Vector3) -> Basis:
+	var helper := Vector3.RIGHT if absf(dir.x) < 0.9 else Vector3.FORWARD
+	var x := helper.cross(dir).normalized()
+	var z := x.cross(dir).normalized()
+	if x.cross(dir).dot(z) < 0.0:
+		z = -z
+	return Basis(x, dir, z)
+
+
 # ------------------------------------------------------- whole-mesh edits ---
 
 func transform(xf: Transform3D) -> void:

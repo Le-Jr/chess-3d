@@ -34,6 +34,77 @@ func test_every_piece_builds_a_sane_mesh() -> void:
 		check(triangles > 100 and triangles < 6000, "%s triangle budget (%d)" % [label, triangles])
 
 
+func test_medieval_set_builds_sane_meshes() -> void:
+	for type: int in TYPES:
+		var mesh := MedievalPieceFactory.build_mesh(type)
+		var label := mesh.resource_name
+		check(mesh == ProceduralPieceFactory.build_mesh(type, ProceduralPieceFactory.DEFAULT_SEGMENTS,
+				ProceduralPieceFactory.STYLE_MEDIEVAL), label + " is what the factory returns for the style")
+		check(mesh != ProceduralPieceFactory.build_mesh(type), label + " differs from the classic mesh")
+		eq(mesh.get_surface_count(), 3, label + " has body, felt and accent surfaces")
+		eq(mesh.surface_get_name(0), ProceduralPieceFactory.SURFACE_BODY, label + " surface 0")
+		eq(mesh.surface_get_name(1), ProceduralPieceFactory.SURFACE_FELT, label + " surface 1")
+		eq(mesh.surface_get_name(2), ProceduralPieceFactory.SURFACE_ACCENT, label + " surface 2")
+
+		var aabb := mesh.get_aabb()
+		check(absf(aabb.position.y) < 0.001, label + " stands on y = 0")
+		# Picking and the capture animation use PieceProfiles.height.
+		check(absf(aabb.end.y - PieceProfiles.height(type)) < 0.2,
+				"%s height %.3f is close to PieceProfiles.height %.3f" % [label, aabb.end.y, PieceProfiles.height(type)])
+		check(aabb.size.x <= 0.8 and aabb.size.z <= 0.8,
+				"%s fits inside a square (%.2f x %.2f)" % [label, aabb.size.x, aabb.size.z])
+		check(absf(aabb.get_center().x) < 0.06 and absf(aabb.get_center().z) < 0.06,
+				label + " is centered on its square")
+
+		var triangles := 0
+		for s in mesh.get_surface_count():
+			var arrays := mesh.surface_get_arrays(s)
+			var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+			var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+			@warning_ignore("integer_division")
+			triangles += indices.size() / 3
+			var bad_normals := 0
+			for n in normals:
+				if absf(n.length() - 1.0) > 0.01:
+					bad_normals += 1
+			eq(bad_normals, 0, "%s surface %d normals are unit length" % [label, s])
+		check(triangles > 800 and triangles < 14000, "%s triangle budget (%d)" % [label, triangles])
+
+
+func test_sculpting_primitives() -> void:
+	var mb := MeshBuilder.new()
+	mb.add_ellipsoid(Vector3(1.0, 2.0, 3.0), Vector3(0.5, 0.25, 0.1), 12, 6)
+	var lo := Vector3.INF
+	var hi := -Vector3.INF
+	for v in mb.verts:
+		lo = lo.min(v)
+		hi = hi.max(v)
+	check((lo + hi).is_equal_approx(Vector3(2.0, 4.0, 6.0)), "ellipsoid is centered where asked")
+	check(absf(hi.y - lo.y - 0.5) < 0.001 and absf(hi.x - lo.x - 1.0) < 0.05, "ellipsoid has the asked radii")
+
+	var cone := MeshBuilder.new()
+	cone.add_cone(Vector3.ZERO, Vector3(0.0, 0.0, 2.0), 0.3, 0.1, 8)
+	var far := 0.0
+	for v in cone.verts:
+		far = maxf(far, v.z)
+		check(v.z > -0.001, "")
+	check(absf(far - 2.0) < 0.001, "cone runs from a to b")
+
+	var loft := MeshBuilder.new()
+	loft.add_loft(PackedVector3Array([Vector3.ZERO, Vector3(0, 1, 0), Vector3(0, 2, 0.5)]),
+			PackedVector2Array([Vector2(0.3, 0.2), Vector2(0.2, 0.2), Vector2(0.1, 0.1)]), 12)
+	check(loft.triangle_count() == 2 * 12 * 2 + 2 * 12, "loft has walls and two caps (%d)" % loft.triangle_count())
+	var inward := 0
+	for t in range(0, loft.verts.size(), 3):
+		var face := (loft.verts[t + 2] - loft.verts[t]).cross(loft.verts[t + 1] - loft.verts[t])
+		if face.dot(loft.norms[t] + loft.norms[t + 1] + loft.norms[t + 2]) <= 0.0:
+			inward += 1
+	eq(inward, 0, "loft winding agrees with its normals")
+	var y_axis := MeshBuilder.basis_from_y(Vector3(0.0, 0.6, 0.8))
+	check((y_axis * Vector3.UP).is_equal_approx(Vector3(0.0, 0.6, 0.8)), "basis_from_y maps Y onto the direction")
+	check(absf(y_axis.determinant() - 1.0) < 0.001, "basis_from_y is a pure rotation")
+
+
 func test_bishop_has_slit_accent() -> void:
 	var mesh := ProceduralPieceFactory.build_mesh(Piece.BISHOP)
 	eq(mesh.get_surface_count(), 3, "bishop has an accent surface")

@@ -14,11 +14,12 @@ func _reset_settings() -> void:
 	GameSettings.piece_set_path = ""
 	GameSettings.auto_rotate_camera = true
 	GameSettings.animations = true
+	GameSettings.sound = true
 	GameSettings.stockfish_path = ""
 
 
 func test_material_presets() -> void:
-	eq(MaterialPresets.preset_count(), 3, "three presets")
+	eq(MaterialPresets.preset_count(), 5, "five presets")
 	var seen := {}
 	for preset in MaterialPresets.preset_count():
 		var white := MaterialPresets.piece_material(preset, Piece.WHITE)
@@ -47,6 +48,7 @@ func test_settings_round_trip() -> void:
 	GameSettings.material_preset = MaterialPresets.Preset.MARBLE
 	GameSettings.piece_set_path = "user://piece_sets/mine.glb"
 	GameSettings.auto_rotate_camera = false
+	GameSettings.sound = false
 	GameSettings.save()
 	_reset_settings()
 	GameSettings.load_saved()
@@ -56,6 +58,22 @@ func test_settings_round_trip() -> void:
 	eq(GameSettings.material_preset, int(MaterialPresets.Preset.MARBLE), "preset saved")
 	eq(GameSettings.piece_set_path, "user://piece_sets/mine.glb", "piece set saved")
 	eq(GameSettings.auto_rotate_camera, false, "auto-rotate saved")
+	eq(GameSettings.sound, false, "sound toggle saved")
+
+	# The classic set stays selected once it has been saved with this version...
+	GameSettings.piece_set_path = ""
+	GameSettings.material_preset = MaterialPresets.Preset.CLASSIC_WOOD
+	GameSettings.save()
+	GameSettings.load_saved()
+	eq(GameSettings.piece_set_path, "", "an explicit choice of the classic set is kept")
+	# ...but settings from before the medieval set existed move to the new look.
+	var old := ConfigFile.new()
+	old.set_value("look", "material_preset", 0)
+	old.set_value("look", "piece_set_path", "")
+	old.save(GameSettings.SETTINGS_FILE)
+	GameSettings.load_saved()
+	eq(GameSettings.piece_set_path, PieceSet.BUILTIN_MEDIEVAL, "old settings switch to the medieval set")
+	eq(GameSettings.material_preset, int(MaterialPresets.Preset.ANTIQUE_METAL), "and to the metal look")
 
 	# Put the player's real settings back.
 	if backup != "":
@@ -71,7 +89,20 @@ func test_missing_piece_set_falls_back_to_procedural() -> void:
 	_reset_settings()
 	check(PieceSet.load_from("res://piece_sets/does_not_exist.glb") == null, "missing glb -> null")
 	check(PieceSet.load_from("res://piece_sets/does_not_exist.tres") == null, "missing tres -> null")
-	check(GameSettings.available_piece_sets()[0]["path"] == "", "procedural set is always offered first")
+	var sets := GameSettings.available_piece_sets()
+	check(sets[0]["path"] == "", "classic set is always offered first")
+	eq(sets[1]["path"], PieceSet.BUILTIN_MEDIEVAL, "then the built-in medieval set")
+	var medieval := PieceSet.load_from(PieceSet.BUILTIN_MEDIEVAL)
+	check(medieval != null and medieval.procedural_style == ProceduralPieceFactory.STYLE_MEDIEVAL,
+			"the built-in path loads the medieval set")
+	GameSettings.piece_set_path = PieceSet.BUILTIN_MEDIEVAL
+	var from_settings := GameSettings.make_piece_set()
+	var knight := from_settings.instantiate(Piece.WHITE | Piece.KNIGHT) as MeshInstance3D
+	check(knight != null and knight.mesh == MedievalPieceFactory.build_mesh(Piece.KNIGHT),
+			"GameSettings hands the game medieval meshes")
+	if knight != null:
+		knight.free()
+	_reset_settings()
 
 
 func test_glb_round_trip_as_piece_set() -> void:

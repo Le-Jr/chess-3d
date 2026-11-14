@@ -11,6 +11,11 @@ extends RefCounted
 
 const DEFAULT_SEGMENTS := 28
 
+## Built-in looks: the classic turned set (this file) and the sculpted
+## medieval figures (MedievalPieceFactory).
+const STYLE_CLASSIC := 0
+const STYLE_MEDIEVAL := 1
+
 const SURFACE_BODY := "body"
 const SURFACE_FELT := "felt"
 const SURFACE_ACCENT := "accent"
@@ -20,7 +25,9 @@ static var _cache := {}
 
 ## Mesh for a piece type (Piece.PAWN .. Piece.KING). Meshes are cached and
 ## shared, so treat them as read-only.
-static func build_mesh(type: int, segments: int = DEFAULT_SEGMENTS) -> ArrayMesh:
+static func build_mesh(type: int, segments: int = DEFAULT_SEGMENTS, style: int = STYLE_CLASSIC) -> ArrayMesh:
+	if style == STYLE_MEDIEVAL:
+		return MedievalPieceFactory.build_mesh(type)
 	var key := type * 1000 + segments
 	if _cache.has(key):
 		return _cache[key]

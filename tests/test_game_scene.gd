@@ -322,6 +322,109 @@ func test_animated_moves() -> void:
 	_close()
 
 
+func _has_effect(game: Node, effect_name: String) -> bool:
+	for child in game.board_view.get_children():
+		if String(child.name).contains(effect_name) and not child.is_queued_for_deletion():
+			return true
+	return false
+
+
+func test_capture_effects() -> void:
+	var game := _open()
+	var tree := Engine.get_main_loop() as SceneTree
+	GameSettings.animations = true
+	game.new_game("4k3/8/8/3p4/8/2N5/8/4K2R w K - 0 1")
+
+	# The pieces drop in at the start of a game without leaving their squares.
+	var rook: Piece3D = game._pieces[_sq("h1")]
+	check(rook.get_child(0).position.y > 1.0, "pieces start above the board")
+	check(rook.position.is_equal_approx(Board3D.square_to_local(_sq("h1"))), "but the node is on its square")
+	await tree.create_timer(1.0).timeout
+	check(absf(rook.get_child(0).position.y) < 0.001, "and land on it")
+
+	# Selecting lifts the piece; deselecting sets it down.
+	game.click_square(_sq("h1"))
+	await tree.create_timer(0.3).timeout
+	check(rook.get_child(0).position.y > 0.1, "selected piece is lifted")
+	game.click_square(-1)
+	await tree.create_timer(0.3).timeout
+	check(absf(rook.get_child(0).position.y) < 0.001, "and set down again")
+
+	# A knight capture: the victim is crushed on its own square, with debris.
+	var victim: Piece3D = game._pieces[_sq("d5")]
+	var hits := [0]
+	victim.struck.connect(func() -> void: hits[0] += 1)
+	game.click_square(_sq("c3"))
+	game.click_square(_sq("d5"))
+	check(not _has_effect(game, "CaptureFx"), "no debris before the blow lands")
+	await tree.create_timer(0.72).timeout
+	eq(hits[0], 1, "the victim is struck once")
+	check(_has_effect(game, "CaptureFx"), "debris spawned on impact")
+	check(is_instance_valid(victim) and victim.scale.y < 0.2, "crushed flat under the knight")
+	check(victim.position.is_equal_approx(Board3D.square_to_local(_sq("d5"))), "without leaving its square")
+	await tree.create_timer(1.6).timeout
+	check(not is_instance_valid(victim), "victim freed")
+	check(not _has_effect(game, "CaptureFx"), "debris cleans itself up")
+	_assert_nodes_match(game)
+
+	# Any other piece knocks its victim away, along the line of the attack.
+	game.new_game("4k3/8/8/8/3p4/8/8/3RK3 w - - 0 1")
+	victim = game._pieces[_sq("d4")]
+	game.click_square(_sq("d1"))
+	game.click_square(_sq("d4"))
+	await tree.create_timer(0.62).timeout
+	check(is_instance_valid(victim) and victim.position.z < Board3D.square_to_local(_sq("d4")).z - 0.2,
+			"victim is thrown away from the attacker")
+	await tree.create_timer(1.0).timeout
+	check(not is_instance_valid(victim), "and removed")
+	_assert_nodes_match(game)
+	_close()
+
+
+func test_checkmate_topples_the_king() -> void:
+	var game := _open()
+	var tree := Engine.get_main_loop() as SceneTree
+	game.debug_play_moves("f2f3,e7e5,g2g4")
+	GameSettings.animations = true
+	var king: Piece3D = game._pieces[_sq("e1")]
+	game.click_square(_sq("d8"))
+	game.click_square(_sq("h4"))
+	await tree.create_timer(2.0).timeout
+	check(game.hud.is_game_over_visible(), "game over shown")
+	check(king.basis.y.y < 0.2, "the mated king lies on its side (up.y = %.2f)" % king.basis.y.y)
+	game.undo_move()
+	king = game._pieces[_sq("e1")]
+	check(king.basis.y.y > 0.99, "undo stands the king back up")
+	_close()
+
+
+func test_sound_effects_are_generated() -> void:
+	for sound: int in Sfx.Sound.values():
+		var stream := Sfx.stream_for(sound)
+		check(stream.data.size() > 2000, "sound %d has samples" % sound)
+		var peak := 0
+		for i in range(0, stream.data.size(), 2):
+			peak = maxi(peak, absi(stream.data.decode_s16(i)))
+		check(peak > 3000 and peak <= 32767, "sound %d is audible and not clipped (peak %d)" % [sound, peak])
+	var game := _open()
+	check(game.sfx is Sfx, "the game scene has its sound player")
+	_close()
+
+
+func test_camera_shake_settles() -> void:
+	var game := _open()
+	var tree := Engine.get_main_loop() as SceneTree
+	var cam: Camera3D = game.camera_rig.camera
+	var rest := cam.h_offset
+	game.camera_rig.shake(0.1)
+	await tree.process_frame
+	await tree.process_frame
+	check(absf(cam.h_offset - rest) > 0.0001 or absf(cam.v_offset) > 0.0001, "shake moves the view")
+	await tree.create_timer(0.8).timeout
+	check(absf(cam.h_offset - rest) < 0.0001 and absf(cam.v_offset) < 0.0001, "and dies out")
+	_close()
+
+
 func test_auto_rotate_camera() -> void:
 	var game := _open()
 	GameSettings.auto_rotate_camera = true

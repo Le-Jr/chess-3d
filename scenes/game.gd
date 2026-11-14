@@ -12,6 +12,7 @@ var board_view: Board3D
 var camera_rig: CameraRig
 var hud: Hud
 var piece_set: PieceSet
+var sfx: Sfx
 
 var _pieces := {}  # square (0x88) -> Piece3D
 var _selected := -1
@@ -36,6 +37,10 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.name = "Hud"
 	add_child(hud)
+
+	sfx = Sfx.new()
+	sfx.name = "Sfx"
+	add_child(sfx)
 	hud.undo_requested.connect(undo_move)
 	hud.new_game_requested.connect(new_game)
 	hud.flip_requested.connect(func() -> void: camera_rig.flip())
@@ -108,6 +113,15 @@ func _is_human_turn() -> bool:
 
 
 func _select(square: int) -> void:
+	if square != _selected:
+		# The selected piece rises off its square.
+		var animate := GameSettings.animations
+		var old: Piece3D = _pieces.get(_selected)
+		if old != null:
+			old.set_lifted(false, animate)
+		var picked: Piece3D = _pieces.get(square)
+		if picked != null:
+			picked.set_lifted(true, animate)
 	_selected = square
 	if square == -1:
 		board_view.clear_selection()
@@ -142,13 +156,31 @@ func _run_move(m: int, mover: int) -> void:
 		var node: Piece3D = _pieces.get(Move.to_sq(m))
 		if node != null and node.piece != (mover | Move.promotion(m)):
 			node.setup(mover | Move.promotion(m), piece_set)
+			if GameSettings.animations:
+				Effects.flash(board_view, node.position)
+				sfx.play(Sfx.Sound.PROMOTE)
+	if not Move.is_capture(m) or duration <= 0.0:
+		sfx.play(Sfx.Sound.CAPTURE if Move.is_capture(m) else Sfx.Sound.MOVE)
 	_after_move()
 
 
 func _after_move() -> void:
+	var animate := GameSettings.animations
+	if state.is_check():
+		var king: Piece3D = _pieces.get(state.board.king_square[Piece.color_index(state.side_to_move())])
+		if king != null and animate:
+			if state.status == GameState.Status.CHECKMATE:
+				# The mated king falls, away from the piece that delivered mate.
+				var from: Vector3 = Board3D.square_to_local(Move.to_sq(state.last_move()))
+				king.topple(king.position - from)
+			else:
+				king.shudder()
 	if state.is_game_over():
+		sfx.play(Sfx.Sound.GAME_OVER)
 		hud.show_game_over(state)
 		return
+	if state.is_check():
+		sfx.play(Sfx.Sound.CHECK)
 	_point_camera_at_turn(true)
 	_start_ai_if_needed()
 
@@ -164,7 +196,8 @@ func _animate_move(m: int, mover: int) -> float:
 		_rebuild_pieces()
 		return 0.0
 
-	var duration := node.move_to(Board3D.square_to_local(to), animate)
+	var start := node.position
+	var duration := node.move_to(Board3D.square_to_local(to), animate, Move.is_capture(m))
 
 	if Move.is_capture(m):
 		var cap_sq := to
@@ -173,7 +206,12 @@ func _animate_move(m: int, mover: int) -> float:
 		var victim: Piece3D = _pieces.get(cap_sq)
 		if victim != null:
 			_pieces.erase(cap_sq)
-			victim.capture_out(animate, duration * 0.55)
+			# A knight lands on its victim; everything else knocks it flying.
+			var style := Piece3D.CaptureStyle.CRUSH if Piece.type_of(node.piece) == Piece.KNIGHT \
+					else Piece3D.CaptureStyle.KNOCK
+			victim.struck.connect(_on_piece_struck)
+			victim.capture_out(animate, duration * node.impact_fraction(),
+					Board3D.square_to_local(cap_sq) - start, style)
 
 	_pieces.erase(from)
 	_pieces[to] = node
@@ -187,6 +225,12 @@ func _animate_move(m: int, mover: int) -> float:
 			_pieces[rook_to] = rook
 			rook.move_to(Board3D.square_to_local(rook_to), animate)
 	return duration
+
+
+# A captured piece was just hit.
+func _on_piece_struck() -> void:
+	camera_rig.shake(0.07)
+	sfx.play(Sfx.Sound.CAPTURE)
 
 
 ## Takes back the last move (in a game against the computer: your last move
@@ -208,17 +252,17 @@ func undo_move() -> void:
 func new_game(fen: String = Board.START_FEN) -> void:
 	_cancel_ai()
 	state.reset(fen)
-	_reset_view()
+	_reset_view(true)
 	_start_ai_if_needed()
 
 
 # Resyncs everything visual with the state after a non-animated change.
-func _reset_view() -> void:
+func _reset_view(intro: bool = false) -> void:
 	_busy = false
 	_pending_promotion = Vector2i(-1, -1)
 	hud.hide_game_over()
 	_select(-1)
-	_rebuild_pieces()
+	_rebuild_pieces(intro and GameSettings.animations)
 	_refresh_view()
 	_point_camera_at_turn(false)
 	if state.is_game_over():
@@ -281,7 +325,8 @@ func _exit_tree() -> void:
 # ------------------------------------------------------------------- view ---
 
 ## Throws away all piece nodes and recreates them from the current position.
-func _rebuild_pieces() -> void:
+## With `intro`, the pieces drop onto the board in a wave from the center out.
+func _rebuild_pieces(intro: bool = false) -> void:
 	for node: Piece3D in _pieces.values():
 		node.queue_free()
 	_pieces.clear()
@@ -296,6 +341,9 @@ func _rebuild_pieces() -> void:
 			node.position = Board3D.square_to_local(square)
 			board_view.add_child(node)
 			_pieces[square] = node
+			if intro:
+				var home_rank := rank if Piece.color_of(p) == Piece.WHITE else 7 - rank
+				node.drop_in(0.05 + absf(file - 3.5) * 0.035 + home_rank * 0.05)
 
 
 # Highlights and HUD.

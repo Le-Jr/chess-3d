@@ -1,8 +1,11 @@
 # Chess 3D
 
 A 3D chess game for Godot 4 (GDScript). Play hot-seat on one machine or
-against a built-in engine, on a 3D board with procedurally generated pieces
-that you can swap for your own `.glb` models.
+against a built-in engine, on a 3D board with procedurally generated pieces -
+a sculpted medieval set (king with sword, queen, bishop with crosier, horse,
+brick tower, foot soldier) or classic turned pieces - that you can also swap
+for your own `.glb` models. Captures are animated: pieces are knocked flying
+or crushed, with debris, dust, camera shake and sound.
 
 Built and tested with **Godot 4.7.2 stable** (anything from 4.4 up should
 work). No third-party addons.
@@ -13,8 +16,9 @@ work). No third-party addons.
 - **Command line:** `godot --path .`
 
 The main menu lets you pick the mode (two players / vs computer), your color,
-the difficulty, the look (classic wood, marble, stylized flat) and the piece
-set. Choices are remembered in `user://settings.cfg`.
+the difficulty, the look (antique metal, carved stone, classic wood, marble,
+stylized flat), the piece set (medieval or classic, plus any you add) and
+whether sound effects play. Choices are remembered in `user://settings.cfg`.
 
 ### Controls
 
@@ -39,9 +43,11 @@ chess/    Pure rules, no Node dependencies (RefCounted): Piece, Move, Board (0x8
           MoveGenerator, San, GameState
 ai/       ChessAI (search + evaluation), AiPlayer (runs it on a Thread),
           StockfishAdapter (optional external UCI engine)
-pieces/   PieceProfiles (the shape data), MeshBuilder, ProceduralPieceFactory,
-          PieceSet (Resource), MaterialPresets
-scenes/   Board3D, Piece3D, CameraRig, Stage (lights/environment), game scene
+pieces/   PieceProfiles (the shape data), MeshBuilder, ProceduralPieceFactory
+          (classic set), MedievalPieceFactory (sculpted set), PieceSet (Resource),
+          MaterialPresets
+scenes/   Board3D, Piece3D (move / capture animations), Effects (debris, dust,
+          flashes), Sfx (synthesized sounds), CameraRig, Stage, game scene
 ui/       Main menu, HUD (move list, captured pieces, promotion picker, game over)
 tools/    Blender export script, glTF exporter, screenshot helper
 tests/    Headless test runner and suites
@@ -76,11 +82,47 @@ What is covered:
   SAN generation and parsing, Zobrist hashing.
 - The AI finds mate-in-1 and mate-in-2 positions, takes hanging pieces,
   stays inside its time budget, and runs on a thread without blocking.
-- The 3D side, headless: piece meshes, picking math, click-to-move, the
-  promotion picker, undo, the game-over dialog, the menu, presets and `.glb`
-  piece sets.
+- The 3D side, headless: piece meshes of both built-in sets, picking math,
+  click-to-move, the promotion picker, undo, the game-over dialog, the menu,
+  presets and `.glb` piece sets.
+- The polish: capture animations (knock / crush) and their debris, the
+  selection lift, the drop-in at the start of a game, the mated king
+  toppling, camera shake and the generated sounds.
 
-## Tweaking the procedural pieces
+## The medieval set
+
+[`pieces/medieval_piece_factory.gd`](pieces/medieval_piece_factory.gd) builds
+six figures on carved pedestals out of `MeshBuilder` primitives - lathes,
+ellipsoids, cones, tori and `add_loft` (a tube with elliptical sections along
+a path: the horse's neck, arms, the crosier's crook). Each piece is one
+function (`_build_king`, `_build_knight`, ...) made of readable parts, so
+changing a crown, a beard or the height of a tower is a matter of editing a
+few numbers. The figures face the enemy.
+
+It is selected with **Pieces -> Medieval (built-in)** (the default), and pairs
+best with the **Antique metal** (aged gold vs. pewter) and **Carved stone**
+(ivory vs. charcoal) looks, which add a cast / carved grain through a
+triplanar noise texture - no UVs or image files needed. From code:
+`PieceSet.medieval(MaterialPresets.Preset.CARVED_STONE)`.
+
+## Animations and sound
+
+- **Moves** lift, arc and set down with a small squash; knights jump.
+- **Captures**: the attacker rears back and lunges; the victim is knocked
+  away along the line of attack, tumbling and fading. A knight instead lands
+  on its victim and flattens it. Either way chips of the victim's own
+  material fly off, dust puffs up, a ring spreads over the square and the
+  camera jolts (`Piece3D.capture_out`, `Effects.shatter`, `CameraRig.shake`).
+- The selected piece rises off its square, a king in check trembles, a mated
+  king falls over, a promotion flashes, and the pieces drop onto the board at
+  the start of a game.
+- **Sounds** (move, capture, check, promotion, game over) are synthesized in
+  [`scenes/sfx.gd`](scenes/sfx.gd), so there are no audio files; turn them
+  off with "Sound effects" in the menu.
+
+`GameSettings.animations = false` makes everything instant.
+
+## Tweaking the classic pieces
 
 All shape data lives in [`pieces/piece_profiles.gd`](pieces/piece_profiles.gd),
 one function per piece. A profile is a list of `(radius, height)` points from
@@ -114,8 +156,8 @@ values, keep them equal to the real mesh height (a test checks this).
 
 A `PieceSet` ([`pieces/piece_set.gd`](pieces/piece_set.gd)) is a Resource that
 maps each piece type to a `Mesh` or `PackedScene`, plus materials for White
-and Black. Empty slots fall back to the procedural mesh, so you can replace
-just the knight if you like.
+and Black. Empty slots fall back to a built-in mesh (classic or medieval,
+see `procedural_style`), so you can replace just the knight if you like.
 
 Model conventions: stand on y = 0, centered on the origin, front toward +Z,
 sized for a 1 x 1 square. `model_scale` and `model_rotation_degrees` on the

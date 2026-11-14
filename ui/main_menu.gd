@@ -1,5 +1,5 @@
 extends Node3D
-## Main menu: game mode, color, AI difficulty, material preset and piece set,
+## Main menu: game mode, color, AI difficulty, look (materials) and piece set,
 ## over a slowly turning live preview of the board with the chosen look.
 
 const GAME_SCENE := "res://scenes/game.tscn"
@@ -165,7 +165,15 @@ func _build_ui() -> void:
 	engine_path.text_changed.connect(func(text: String) -> void: GameSettings.stockfish_path = text.strip_edges())
 	_engine_row.add_child(engine_path)
 	box.add_child(HSeparator.new())
-	_add_choice_row(box, "Look", MaterialPresets.NAMES, GameSettings.material_preset, set_preset)
+	box.add_child(UiStyle.make_label("Look", 13, UiStyle.TEXT_DIM))
+	var looks := OptionButton.new()
+	looks.name = "LookPicker"
+	UiStyle.style_button(looks)
+	for preset_name: String in MaterialPresets.NAMES:
+		looks.add_item(preset_name)
+	looks.select(GameSettings.material_preset)
+	looks.item_selected.connect(set_preset)
+	box.add_child(looks)
 
 	box.add_child(UiStyle.make_label("Pieces", 13, UiStyle.TEXT_DIM))
 	var sets := OptionButton.new()
@@ -187,6 +195,16 @@ func _build_ui() -> void:
 	_rotate_check.focus_mode = Control.FOCUS_NONE
 	_rotate_check.toggled.connect(func(on: bool) -> void: GameSettings.auto_rotate_camera = on)
 	box.add_child(_rotate_check)
+
+	var sound_check := CheckButton.new()
+	sound_check.name = "SoundCheck"
+	sound_check.text = "Sound effects"
+	sound_check.button_pressed = GameSettings.sound
+	sound_check.add_theme_font_size_override("font_size", 14)
+	sound_check.add_theme_color_override("font_color", UiStyle.TEXT)
+	sound_check.focus_mode = Control.FOCUS_NONE
+	sound_check.toggled.connect(func(on: bool) -> void: GameSettings.sound = on)
+	box.add_child(sound_check)
 
 	var filler := Control.new()
 	filler.size_flags_vertical = Control.SIZE_EXPAND_FILL

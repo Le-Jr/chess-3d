@@ -42,6 +42,7 @@ var _yaw := 0.0
 var _pitch := 60.0
 var _dist := 14.2
 var _dragging := false
+var _shake := 0.0
 
 
 func _init() -> void:
@@ -85,10 +86,20 @@ func snap() -> void:
 	_apply()
 
 
+## Jolts the view briefly (a capture landing). `strength` is in board units.
+func shake(strength: float = 0.06) -> void:
+	_shake = maxf(_shake, strength)
+
+
 func _process(delta: float) -> void:
 	var w := 1.0 - exp(-smoothing * delta)
 	var target_yaw := _seat_yaw + _yaw_offset
-	if is_equal_approx(_yaw, target_yaw) and is_equal_approx(_pitch, _target_pitch) \
+	var shaking := _shake > 0.0
+	if shaking:
+		_shake *= exp(-11.0 * delta)
+		if _shake < 0.003:
+			_shake = 0.0
+	if not shaking and is_equal_approx(_yaw, target_yaw) and is_equal_approx(_pitch, _target_pitch) \
 			and is_equal_approx(_dist, _target_distance):
 		return
 	_yaw = lerpf(_yaw, target_yaw, w)
@@ -120,10 +131,13 @@ func _apply() -> void:
 	var dir := Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch))
 	var focus := Vector3(sin(yaw), 0.0, cos(yaw)) * focus_offset
 	camera.transform = Transform3D(Basis.looking_at(-dir, Vector3.UP), focus + dir * _dist)
+	var shift := 0.0
 	if screen_shift_px != 0.0 and is_inside_tree():
 		var view_height := get_viewport().get_visible_rect().size.y
 		var units_per_px := 2.0 * _dist * tan(deg_to_rad(camera.fov) * 0.5) / maxf(view_height, 1.0)
-		camera.h_offset = screen_shift_px * 0.5 * units_per_px
+		shift = screen_shift_px * 0.5 * units_per_px
+	camera.h_offset = shift + randf_range(-1.0, 1.0) * _shake
+	camera.v_offset = randf_range(-1.0, 1.0) * _shake
 
 
 ## Sets the view directly (debugging / screenshots); ignores the usual clamps.

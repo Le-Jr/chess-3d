@@ -248,3 +248,37 @@ func test_game_vs_ai_as_black() -> void:
 	eq(game.state.ply_count(), 1, "the computer played the first move")
 	eq(game.state.side_to_move(), Piece.BLACK)
 	_close_game(game)
+
+
+func test_ai_player_without_threads() -> void:
+	# What a web export made without thread support does: the search runs on
+	# the main thread, two frames after think().
+	var tree := Engine.get_main_loop() as SceneTree
+	AiPlayer.force_main_thread = true
+	check(not AiPlayer.has_threads(), "threads reported as unavailable")
+	var state := GameState.new("6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1")
+	var player := AiPlayer.new()
+	var got := []
+	player.move_ready.connect(func(m: int, info: Dictionary) -> void: got.append([m, info]))
+	player.think(state, 0)
+	check(player.is_thinking(), "thinking right after think()")
+	eq(got.size(), 0, "think() itself returns at once")
+	for i in 400:
+		if not got.is_empty():
+			break
+		await tree.process_frame
+	eq(got.size(), 1, "the move arrives a few frames later")
+	if got.size() == 1:
+		eq(Move.to_uci(got[0][0]), "a1a8", "and it is the mate in one")
+		eq(got[0][1]["engine"], "built-in")
+	check(not player.is_thinking(), "idle again")
+
+	# A cancelled search never reports.
+	got.clear()
+	player.think(state, 0)
+	player.cancel()
+	for i in 10:
+		await tree.process_frame
+	eq(got.size(), 0, "cancel() before the search starts discards it")
+	check(not player.is_thinking(), "not thinking after cancel")
+	AiPlayer.force_main_thread = false

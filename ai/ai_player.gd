@@ -1,6 +1,9 @@
 class_name AiPlayer
 extends RefCounted
 ## Runs the computer opponent on a background Thread so the UI never freezes.
+## (In a build without thread support - a web export made with "Thread
+## Support" off - it searches on the main thread instead, one frame after
+## think(), and the picture stalls while it does.)
 ##
 ##   var ai := AiPlayer.new()
 ##   ai.move_ready.connect(func(move, info): ...)
@@ -24,11 +27,20 @@ const MIN_THINK_MS := 350
 var _thread: Thread
 var _engine: ChessAI
 var _external: StockfishAdapter
+## Set to search on the main thread even where threads exist (tests).
+static var force_main_thread := false
+
 var _token := 0
+var _blocking := false  # a main-thread search is queued or running
 
 
 func is_thinking() -> bool:
-	return _thread != null
+	return _thread != null or _blocking
+
+
+## Whether searches can run on their own thread in this build.
+static func has_threads() -> bool:
+	return not force_main_thread and not OS.has_feature("nothreads")
 
 
 ## Starts searching the current position of `state` at difficulty `level`
@@ -51,8 +63,28 @@ func think(state: GameState, level: int) -> void:
 		"engine_path": GameSettings.stockfish_path,
 		"engine_args": GameSettings.stockfish_args,
 	}
+	if not has_threads():
+		_blocking = true
+		_search_on_main_thread(_engine, job)
+		return
 	_thread = Thread.new()
 	_thread.start(_search.bind(_engine, _external, job))
+
+
+# No threads: let two frames draw ("Computer is thinking..."), then search.
+func _search_on_main_thread(engine: ChessAI, job: Dictionary) -> void:
+	var loop := Engine.get_main_loop() as SceneTree
+	await loop.process_frame
+	await loop.process_frame
+	if job["token"] != _token:
+		return
+	var result: Dictionary = engine.choose_move(job["board"], job["level"], job["history"])
+	result["engine"] = "built-in"
+	if job["token"] != _token:
+		return
+	_blocking = false
+	_engine = null
+	move_ready.emit(result["move"], result)
 
 
 ## Stops the running search (if any) and discards its result.
@@ -65,6 +97,7 @@ func cancel() -> void:
 	if _thread != null:
 		_thread.wait_to_finish()
 	_thread = null
+	_blocking = false
 	_engine = null
 	_external = null
 

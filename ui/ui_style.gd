@@ -2,8 +2,8 @@ class_name UiStyle
 extends RefCounted
 ## Shared look for the menus and the HUD (all UI is built in code): dark
 ## leather panels with gilded frames and corner studs, parchment-colored serif
-## text, blackletter titles where the system has such a font, and a sword for
-## a mouse cursor. Nothing here needs an image or font file.
+## text (EB Garamond), inscription-style titles (Cinzel) and a sword for a
+## mouse cursor. The fonts in res://fonts are the only asset files it uses.
 
 const TEXT := Color(0.94, 0.88, 0.74)       # parchment
 const TEXT_DIM := Color(0.68, 0.59, 0.44)
@@ -26,50 +26,82 @@ const CURSOR_HOTSPOT := Vector2(3, 3)
 ## Fallback for the glyphs, indexed by piece type.
 const LETTERS := ["", "P", "N", "B", "R", "Q", "K"]
 
-static var _glyph_font: SystemFont
+## Fonts shipped with the game (SIL Open Font License, see fonts/*-OFL.txt).
+## They give every platform the same look; browsers and some phones cannot
+## reach system fonts at all.
+const FONT_DIR := "res://fonts/"
+const BODY_FONT_FILE := "EBGaramond.ttf"
+const TITLE_FONT_FILE := "Cinzel.ttf"
+const GLYPH_FONT_FILE := "NotoSansSymbols2.ttf"
+
+static var _glyph_font: Font
 static var _has_glyphs := -1  # -1 = not checked yet
-static var _body_font: SystemFont
-static var _title_font: SystemFont
+static var _body_font: Font
+static var _title_font: Font
 static var _theme: Theme
 static var _cursors := {}
 
 
 # ------------------------------------------------------------------ fonts ---
 
-## Serif text face (Palatino / Book Antiqua / Georgia, whichever exists).
+# A bundled variable font at a given weight, or null if the file is missing.
+static func _bundled_font(file_name: String, weight: int = 0) -> Font:
+	var path := FONT_DIR + file_name
+	if not ResourceLoader.exists(path):
+		return null
+	var base := load(path) as Font
+	if base == null or weight <= 0:
+		return base
+	var variation := FontVariation.new()
+	variation.base_font = base
+	variation.variation_opentype = {
+		TextServerManager.get_primary_interface().name_to_tag("wght"): weight,
+	}
+	return variation
+
+
+## Text face: EB Garamond, or a system serif if the font file is missing.
 static func body_font() -> Font:
 	if _body_font == null:
-		_body_font = SystemFont.new()
-		_body_font.font_names = PackedStringArray([
+		_body_font = _bundled_font(BODY_FONT_FILE, 500)
+	if _body_font == null:
+		var system := SystemFont.new()
+		system.font_names = PackedStringArray([
 			"Palatino Linotype", "Book Antiqua", "Palatino", "Constantia", "Georgia",
 			"URW Palladio L", "Noto Serif", "DejaVu Serif", "serif"])
+		_body_font = system
 	return _body_font
 
 
-## Display face for titles: a blackletter if the system has one, otherwise a
-## bold serif.
+## Display face for titles: Cinzel (inscription capitals), or a bold system
+## serif if the font file is missing.
 static func title_font() -> Font:
 	if _title_font == null:
-		_title_font = SystemFont.new()
-		_title_font.font_names = PackedStringArray([
-			"Old English Text MT", "UnifrakturMaguntia", "Cloister Black", "Luminari",
+		_title_font = _bundled_font(TITLE_FONT_FILE, 800)
+	if _title_font == null:
+		var system := SystemFont.new()
+		system.font_names = PackedStringArray([
 			"Palatino Linotype", "Book Antiqua", "Georgia", "DejaVu Serif", "serif"])
-		_title_font.font_weight = 700
+		system.font_weight = 700
+		_title_font = system
 	return _title_font
 
 
-## A font that has the chess glyphs on Windows, macOS and Linux.
+## A font that has the chess glyphs.
 static func glyph_font() -> Font:
 	if _glyph_font == null:
-		_glyph_font = SystemFont.new()
-		_glyph_font.font_names = PackedStringArray([
+		_glyph_font = _bundled_font(GLYPH_FONT_FILE)
+	if _glyph_font == null:
+		var system := SystemFont.new()
+		system.font_names = PackedStringArray([
 			"Segoe UI Symbol", "Apple Symbols", "DejaVu Sans", "Noto Sans Symbols2", "Noto Sans Symbols",
 			"FreeSerif"])
+		_glyph_font = system
 	return _glyph_font
 
 
 ## The chess symbol for a piece type - or its letter where the device has
-## no font with chess symbols (some phones and all web browsers).
+## no font with chess symbols (the bundled font file is missing).
 static func glyph(type: int) -> String:
 	if _has_glyphs == -1:
 		_has_glyphs = 1 if glyph_font().has_char("♟".unicode_at(0)) else 0

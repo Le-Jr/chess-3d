@@ -66,15 +66,59 @@ godot --path . --resolution 520x1100 -- --touch     # upright
 godot --path . --resolution 1100x520 -- --touch     # sideways
 ```
 
+### Web build
+
+```powershell
+.\tools\export_web.ps1 -Serve        # exports to build/web and serves http://localhost:8060
+```
+
+or by hand: `godot --headless --path . --export-release "Web" build/web/index.html`,
+then `python tools/serve_web.py`. It needs Godot's web export templates
+(Editor -> Manage Export Templates). The preset is in `export_presets.cfg`.
+
+How the build is set up, and why:
+
+- **Renderer.** Browsers get the Compatibility renderer (WebGL 2), chosen
+  by Godot automatically; `Stage` drops SSAO and glow there.
+- **Threads on.** The chess engine, the sound effects and the menu music are
+  computed on background threads, so the preset enables "Thread Support".
+  Browsers only allow threads on *cross-origin isolated* pages; the preset
+  also enables the PWA service worker with "Ensure Cross-Origin Isolation
+  Headers", which makes that work on hosts where you cannot set headers
+  (GitHub Pages, itch.io without the SharedArrayBuffer option) at the cost
+  of one automatic reload on the first visit. `tools/serve_web.py` sends the
+  headers itself. If you export with threads off instead, the game still
+  works but the picture stalls while the computer thinks and while the
+  sounds are generated at startup.
+- **Fonts are bundled** (`fonts/`: EB Garamond, Cinzel, Noto Sans Symbols 2,
+  all SIL Open Font License), because a browser cannot reach system fonts.
+  They are used on every platform, so the look is the same everywhere.
+- **Size.** About 40 MB on disk, of which 38.8 MB is the engine
+  (`index.wasm`) and 1.4 MB the game; served with gzip or Brotli - which
+  itch.io, Netlify, Cloudflare Pages and GitHub Pages do - it is roughly
+  12 MB over the wire with gzip (less with Brotli). The service worker caches it, so later visits (and
+  offline play) load from disk.
+- **Hosting.** Upload the contents of `build/web` to any static HTTPS host.
+  It has to be HTTPS (or localhost): both the service worker and threads
+  require a secure context, so a phone cannot load it from
+  `http://192.168.x.x`.
+
+Checked in desktop Chrome: loads without console errors, multi-threaded and
+cross-origin isolated, menu and game render, moves and the computer's reply
+work, the sword cursor shows. Not checked: sound (needs ears), other
+browsers, and real phones.
+
+### Android
+
 To build for Android: install the Android export templates and SDK in the
 editor (Editor Settings -> Export -> Android), add an Android preset in
 Project -> Export, and export an APK / AAB. The project already allows both
 orientations (`display/window/handheld/orientation = sensor`) and uses the
 Mobile renderer there.
 
-**Not verified yet:** this was developed and tested on a desktop with
-phone-sized windows and synthetic touch events; it has not been run on a
-real device, and no Android / iOS / web build has been made.
+**Not verified yet:** the touch layouts were developed and tested on a
+desktop with phone-sized windows and synthetic touch events; nothing has
+been run on a real phone, and no Android / iOS build has been made.
 
 ## Project layout
 
@@ -93,7 +137,9 @@ ui/       UiLayout (responsive layout and touch scaling, see "Mobile port"),
           UiStyle (the medieval look: panels, fonts, theme, sword cursor), main
           menu, HUD (move list, captured pieces, camera angle, promotion
           picker, game over, the cinematic layer)
-tools/    Blender export script, glTF exporter, screenshot helper
+tools/    Blender export script, glTF exporter, screenshot helper, web export
+          script and local web server
+fonts/    The bundled fonts and their licenses
 tests/    Headless test runner and suites
 ```
 

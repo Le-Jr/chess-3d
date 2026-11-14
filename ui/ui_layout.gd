@@ -55,10 +55,15 @@ static func scale_for(window_size: Vector2, touch: bool, base_size: Vector2,
 static func _touch_short_side(window: Window) -> float:
 	if not (OS.has_feature("mobile") or OS.has_feature("web")):
 		return TOUCH_SHORT_SIDE_FORCED
+	var short_side := minf(window.size.x, window.size.y)
+	if OS.has_feature("web"):
+		# In a browser the canvas is CSS pixels times the device pixel ratio,
+		# and CSS pixels are already density-independent.
+		var ratio := maxf(DisplayServer.screen_get_scale(window.current_screen), 1.0)
+		return clampf(short_side / ratio, TOUCH_SHORT_SIDE_MIN, TOUCH_SHORT_SIDE_MAX)
 	var dpi := DisplayServer.screen_get_dpi(window.current_screen)
 	if dpi <= 0:
 		return TOUCH_SHORT_SIDE_FORCED
-	var short_side := minf(window.size.x, window.size.y)
 	return clampf(short_side / dpi * 160.0, TOUCH_SHORT_SIDE_MIN, TOUCH_SHORT_SIDE_MAX)
 
 

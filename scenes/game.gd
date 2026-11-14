@@ -19,6 +19,9 @@ var _selected := -1
 var _busy := false  # a move animation is playing
 var _pending_promotion := Vector2i(-1, -1)  # (from, to) while the picker is open
 var _ai := AiPlayer.new()
+var _cinematic: Tween  # the checkmate sequence, while it plays
+var _slow_token := 0
+var _hover_shape := Input.CURSOR_ARROW
 
 
 func _ready() -> void:
@@ -32,6 +35,7 @@ func _ready() -> void:
 	camera_rig = CameraRig.new()
 	camera_rig.name = "CameraRig"
 	camera_rig.screen_shift_px = Hud.PANEL_WIDTH + Hud.PANEL_MARGIN
+	camera_rig.pitch_deg = GameSettings.camera_pitch
 	add_child(camera_rig)
 
 	hud = Hud.new()
@@ -47,6 +51,10 @@ func _ready() -> void:
 	hud.menu_requested.connect(_go_to_menu)
 	hud.auto_rotate_toggled.connect(_on_auto_rotate_toggled)
 	hud.promotion_chosen.connect(_on_promotion_chosen)
+	hud.camera_pitch_changed.connect(_on_camera_pitch_changed)
+	hud.camera_pitch_committed.connect(GameSettings.save)
+	hud.set_camera_pitch(GameSettings.camera_pitch)
+	UiStyle.set_sword_cursor(true)
 	hud.set_menu_available(ResourceLoader.exists(MAIN_MENU_SCENE))
 	_ai.move_ready.connect(_on_ai_move_ready)
 
@@ -58,7 +66,9 @@ func _ready() -> void:
 # ------------------------------------------------------------------ input ---
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
+	if event is InputEventMouseMotion:
+		_update_hover((event as InputEventMouseMotion).position)
+	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
 			click_square(board_view.pick_square(camera_rig.camera, mb.position, state.board))
@@ -70,6 +80,29 @@ func _unhandled_input(event: InputEvent) -> void:
 				camera_rig.flip()
 			KEY_ESCAPE:
 				_select(-1)
+
+
+# The sword glows over anything a click would act on: one of your pieces, or
+# a square the selected piece can move to.
+func _update_hover(screen_pos: Vector2) -> void:
+	var shape := Input.CURSOR_ARROW
+	if not (_busy or state.is_game_over() or not _is_human_turn() or hud.is_asking_promotion()):
+		var square := board_view.pick_square(camera_rig.camera, screen_pos, state.board)
+		if square != -1:
+			var p := state.board.piece_at(square)
+			if p != Piece.NONE and Piece.color_of(p) == state.side_to_move():
+				shape = Input.CURSOR_POINTING_HAND
+			elif _selected != -1 and (state.find_move(_selected, square) != Move.NONE
+					or state.needs_promotion(_selected, square)):
+				shape = Input.CURSOR_POINTING_HAND
+	if shape != _hover_shape:
+		_hover_shape = shape
+		Input.set_default_cursor_shape(shape)
+
+
+func _on_camera_pitch_changed(degrees: float) -> void:
+	GameSettings.camera_pitch = degrees
+	camera_rig.set_pitch(degrees)
 
 
 ## Handles a click on a square (-1 = off the board): select a piece, or move
@@ -122,6 +155,7 @@ func _select(square: int) -> void:
 		var picked: Piece3D = _pieces.get(square)
 		if picked != null:
 			picked.set_lifted(true, animate)
+			sfx.play(Sfx.Sound.SELECT)
 	_selected = square
 	if square == -1:
 		board_view.clear_selection()
@@ -166,19 +200,19 @@ func _run_move(m: int, mover: int) -> void:
 
 func _after_move() -> void:
 	var animate := GameSettings.animations
+	var king: Piece3D = null
 	if state.is_check():
-		var king: Piece3D = _pieces.get(state.board.king_square[Piece.color_index(state.side_to_move())])
-		if king != null and animate:
-			if state.status == GameState.Status.CHECKMATE:
-				# The mated king falls, away from the piece that delivered mate.
-				var from: Vector3 = Board3D.square_to_local(Move.to_sq(state.last_move()))
-				king.topple(king.position - from)
-			else:
-				king.shudder()
+		king = _pieces.get(state.board.king_square[Piece.color_index(state.side_to_move())])
 	if state.is_game_over():
-		sfx.play(Sfx.Sound.GAME_OVER)
-		hud.show_game_over(state)
+		if state.status == GameState.Status.CHECKMATE and king != null and animate:
+			_play_checkmate(king)
+		else:
+			sfx.play(Sfx.Sound.CHECKMATE if state.status == GameState.Status.CHECKMATE
+					else Sfx.Sound.GAME_OVER)
+			hud.show_game_over(state)
 		return
+	if king != null and animate:
+		king.shudder()
 	if state.is_check():
 		sfx.play(Sfx.Sound.CHECK)
 	_point_camera_at_turn(true)
@@ -209,7 +243,7 @@ func _animate_move(m: int, mover: int) -> float:
 			# A knight lands on its victim; everything else knocks it flying.
 			var style := Piece3D.CaptureStyle.CRUSH if Piece.type_of(node.piece) == Piece.KNIGHT \
 					else Piece3D.CaptureStyle.KNOCK
-			victim.struck.connect(_on_piece_struck)
+			victim.struck.connect(_on_piece_struck.bind(Board3D.square_to_local(cap_sq), victim.piece))
 			victim.capture_out(animate, duration * node.impact_fraction(),
 					Board3D.square_to_local(cap_sq) - start, style)
 
@@ -227,10 +261,84 @@ func _animate_move(m: int, mover: int) -> float:
 	return duration
 
 
-# A captured piece was just hit.
-func _on_piece_struck() -> void:
-	camera_rig.shake(0.07)
+# A captured piece was just hit: the camera lunges at the square, the picture
+# flashes and time stalls for an instant. The bigger the piece, the harder.
+func _on_piece_struck(at: Vector3, victim: int) -> void:
+	var weight: float = [0.0, 0.35, 0.6, 0.6, 0.75, 1.0, 1.0][Piece.type_of(victim)]
+	camera_rig.shake(0.05 + 0.05 * weight)
+	camera_rig.punch_in(at + Vector3.UP * 0.4, 0.16 + 0.14 * weight, 0.55 + 0.25 * weight)
+	hud.impact_flash(0.10 + 0.14 * weight)
 	sfx.play(Sfx.Sound.CAPTURE)
+	_slow_motion(0.22, 0.07 + 0.08 * weight)
+
+
+# Runs the game at `scale` speed for `real_seconds`, then back to normal.
+func _slow_motion(scale: float, real_seconds: float) -> void:
+	_slow_token += 1
+	var token := _slow_token
+	Engine.time_scale = scale
+	await get_tree().create_timer(real_seconds, true, false, true).timeout
+	if token == _slow_token and not _is_cinematic_playing():
+		Engine.time_scale = 1.0
+
+
+# ---------------------------------------------------------------- checkmate ---
+
+# The end of the king, in slow motion: the camera drops to a close, low,
+# slowly circling shot while he falls, the bars of a film frame slide in,
+# "Checkmate" slams onto the screen to drums, bell and horn - and then the
+# result dialog unrolls and the view is handed back.
+func _play_checkmate(king: Piece3D) -> void:
+	_stop_cinematic()
+	# He falls away from the piece that delivered mate.
+	var from: Vector3 = Board3D.square_to_local(Move.to_sq(state.last_move()))
+	var away := king.position - from
+	king.topple(away)
+
+	_slow_token += 1
+	Engine.time_scale = 0.28
+	sfx.play(Sfx.Sound.CHECKMATE)
+	camera_rig.shake(0.09)
+	hud.impact_flash(0.30, Color(1.0, 0.72, 0.45))
+	hud.set_letterbox(true)
+	hud.announce("Checkmate", "%s is victorious" % Piece.color_name(state.winner))
+	# Look at where the king will lie, from the side he falls toward.
+	var fall := Vector3(away.x, 0.0, away.z).normalized() * 0.45
+	var side := 30.0 if fall.x >= 0.0 else -30.0
+	camera_rig.cinematic(king.position + fall + Vector3.UP * 0.35, 17.0, 5.4, side, 9.0, 1.5)
+
+	_cinematic = create_tween()
+	if _cinematic.has_method("set_ignore_time_scale"):
+		_cinematic.call("set_ignore_time_scale", true)
+	_cinematic.tween_interval(1.5)
+	_cinematic.tween_method(func(v: float) -> void: Engine.time_scale = v, 0.28, 1.0, 0.5)
+	_cinematic.tween_interval(1.4)
+	_cinematic.tween_callback(_finish_checkmate)
+
+
+func _finish_checkmate() -> void:
+	_cinematic = null
+	Engine.time_scale = 1.0
+	hud.set_letterbox(false)
+	hud.hide_announcement()
+	camera_rig.release(1.6)
+	hud.show_game_over(state)
+
+
+func _is_cinematic_playing() -> bool:
+	return _cinematic != null and _cinematic.is_valid()
+
+
+# Cuts the checkmate sequence short (undo, new game, leaving the scene).
+func _stop_cinematic() -> void:
+	if _is_cinematic_playing():
+		_cinematic.kill()
+	_cinematic = null
+	_slow_token += 1
+	Engine.time_scale = 1.0
+	hud.set_letterbox(false, false)
+	hud.hide_announcement(false)
+	camera_rig.release(0.0)
 
 
 ## Takes back the last move (in a game against the computer: your last move
@@ -253,11 +361,14 @@ func new_game(fen: String = Board.START_FEN) -> void:
 	_cancel_ai()
 	state.reset(fen)
 	_reset_view(true)
+	if GameSettings.animations:
+		sfx.play(Sfx.Sound.START)
 	_start_ai_if_needed()
 
 
 # Resyncs everything visual with the state after a non-animated change.
 func _reset_view(intro: bool = false) -> void:
+	_stop_cinematic()
 	_busy = false
 	_pending_promotion = Vector2i(-1, -1)
 	hud.hide_game_over()
@@ -287,6 +398,7 @@ func _on_auto_rotate_toggled(enabled: bool) -> void:
 
 func _go_to_menu() -> void:
 	_cancel_ai()
+	_stop_cinematic()
 	if ResourceLoader.exists(MAIN_MENU_SCENE):
 		get_tree().change_scene_to_file(MAIN_MENU_SCENE)
 
@@ -320,6 +432,10 @@ func _on_ai_move_ready(m: int, _info: Dictionary) -> void:
 
 func _exit_tree() -> void:
 	_ai.cancel()
+	if _is_cinematic_playing():
+		_cinematic.kill()
+	Engine.time_scale = 1.0
+	UiStyle.set_sword_cursor(false)
 
 
 # ------------------------------------------------------------------- view ---

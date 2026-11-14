@@ -25,6 +25,7 @@ var _engine_row: Control
 
 func _ready() -> void:
 	GameSettings.load_saved()
+	Sfx.warm_up()
 	_color_choice = 1 if GameSettings.human_color == Piece.BLACK else 0
 	_piece_sets = GameSettings.available_piece_sets()
 
@@ -132,7 +133,9 @@ func _build_ui() -> void:
 
 	var panel := PanelContainer.new()
 	panel.name = "MenuPanel"
-	panel.add_theme_stylebox_override("panel", UiStyle.panel(16, 26))
+	panel.theme = UiStyle.theme()
+	panel.add_theme_stylebox_override("panel", UiStyle.panel(6, 24))
+	UiStyle.decorate(panel)
 	panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
 	panel.offset_left = PANEL_MARGIN
 	panel.offset_right = PANEL_MARGIN + PANEL_WIDTH
@@ -144,10 +147,10 @@ func _build_ui() -> void:
 	box.add_theme_constant_override("separation", 9)
 	panel.add_child(box)
 
-	var title := UiStyle.make_label("Chess 3D", 44, UiStyle.ACCENT)
+	var title := UiStyle.make_title("Chess 3D", 54)
 	box.add_child(title)
 	box.add_child(UiStyle.make_label("Play on one computer, or against the engine.", 14, UiStyle.TEXT_DIM))
-	box.add_child(_spacer(6))
+	box.add_child(UiStyle.make_divider())
 
 	_add_choice_row(box, "Mode", ["Two players", "vs Computer"], int(GameSettings.mode), set_mode)
 	_color_row = _add_choice_row(box, "Play as", ["White", "Black", "Random"], _color_choice,
@@ -164,7 +167,7 @@ func _build_ui() -> void:
 	engine_path.add_theme_font_size_override("font_size", 13)
 	engine_path.text_changed.connect(func(text: String) -> void: GameSettings.stockfish_path = text.strip_edges())
 	_engine_row.add_child(engine_path)
-	box.add_child(HSeparator.new())
+	box.add_child(UiStyle.make_divider())
 	box.add_child(UiStyle.make_label("Look", 13, UiStyle.TEXT_DIM))
 	var looks := OptionButton.new()
 	looks.name = "LookPicker"
@@ -191,7 +194,6 @@ func _build_ui() -> void:
 	_rotate_check.text = "Rotate board each turn"
 	_rotate_check.button_pressed = GameSettings.auto_rotate_camera
 	_rotate_check.add_theme_font_size_override("font_size", 14)
-	_rotate_check.add_theme_color_override("font_color", UiStyle.TEXT)
 	_rotate_check.focus_mode = Control.FOCUS_NONE
 	_rotate_check.toggled.connect(func(on: bool) -> void: GameSettings.auto_rotate_camera = on)
 	box.add_child(_rotate_check)
@@ -201,7 +203,6 @@ func _build_ui() -> void:
 	sound_check.text = "Sound effects"
 	sound_check.button_pressed = GameSettings.sound
 	sound_check.add_theme_font_size_override("font_size", 14)
-	sound_check.add_theme_color_override("font_color", UiStyle.TEXT)
 	sound_check.focus_mode = Control.FOCUS_NONE
 	sound_check.toggled.connect(func(on: bool) -> void: GameSettings.sound = on)
 	box.add_child(sound_check)
@@ -212,10 +213,7 @@ func _build_ui() -> void:
 
 	var start := UiStyle.make_button("Start game", 22)
 	start.name = "StartButton"
-	start.add_theme_stylebox_override("normal", _accent_box(UiStyle.ACCENT))
-	start.add_theme_stylebox_override("hover", _accent_box(UiStyle.ACCENT.lightened(0.15)))
-	start.add_theme_color_override("font_color", Color(0.1, 0.09, 0.07))
-	start.add_theme_color_override("font_hover_color", Color(0.1, 0.09, 0.07))
+	UiStyle.style_primary(start, 26)
 	start.pressed.connect(start_game)
 	box.add_child(start)
 
@@ -252,14 +250,6 @@ func _add_choice_row(parent: Control, title: String, options: Array, selected: i
 		row.add_child(b)
 		collect.append(b)
 	return wrapper
-
-
-func _accent_box(color: Color) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = color
-	sb.set_corner_radius_all(9)
-	sb.set_content_margin_all(12)
-	return sb
 
 
 func _spacer(height: int) -> Control:

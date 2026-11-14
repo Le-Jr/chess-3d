@@ -45,7 +45,18 @@ func test_camera_tilt() -> void:
 	var cam: Camera3D = game.camera_rig.camera
 	var forward := -cam.global_transform.basis.z
 	var tilt := rad_to_deg(asin(-forward.y))
-	check(tilt >= 55.0 and tilt <= 65.0, "camera tilt %.1f deg is within 55-65" % tilt)
+	check(absf(tilt - GameSettings.camera_pitch) < 2.0,
+			"camera tilt %.1f deg follows the setting (%.0f)" % [tilt, GameSettings.camera_pitch])
+	check(tilt >= 40.0 and tilt <= 65.0, "the default view is angled, not top-down")
+	# The HUD slider changes the angle and the setting.
+	var before := GameSettings.camera_pitch
+	game.hud.camera_pitch_changed.emit(30.0)
+	game.camera_rig.snap()
+	forward = -cam.global_transform.basis.z
+	check(absf(rad_to_deg(asin(-forward.y)) - 30.0) < 2.0, "the slider lowers the camera")
+	eq(GameSettings.camera_pitch, 30.0, "and is remembered")
+	game.hud.camera_pitch_changed.emit(before)
+	game.camera_rig.snap()
 	check(cam.global_position.z > 0.0, "camera starts behind White")
 	game.camera_rig.face_side(Piece.BLACK, false)
 	check(cam.global_position.z < 0.0, "face_side(BLACK) moves behind Black")
@@ -389,13 +400,87 @@ func test_checkmate_topples_the_king() -> void:
 	var king: Piece3D = game._pieces[_sq("e1")]
 	game.click_square(_sq("d8"))
 	game.click_square(_sq("h4"))
-	await tree.create_timer(2.0).timeout
-	check(game.hud.is_game_over_visible(), "game over shown")
+	# The checkmate sequence: slow motion, film bars, a banner, a close shot.
+	await tree.create_timer(0.75).timeout
+	check(Engine.time_scale < 0.5, "time slows down for the mate (scale %.2f)" % Engine.time_scale)
+	check(game.hud.is_letterboxed(), "film bars slide in")
+	check(game.hud.is_announcing(), "the banner is up")
+	eq(game.hud._banner.text, "Checkmate")
+	eq(game.hud._banner_sub.text, "Black is victorious")
+	check(game.camera_rig.is_in_cinematic(), "the camera flies to the king")
+	check(not game.hud.is_game_over_visible(), "the dialog waits for the shot to play out")
+	var cam: Camera3D = game.camera_rig.camera
+	check(cam.global_position.distance_to(king.global_position) < 9.0, "and gets close to him")
+	# Wait for the sequence in real time (it ignores the slowed clock).
+	var waited := 0
+	while not game.hud.is_game_over_visible() and waited < 600:
+		await tree.process_frame
+		waited += 1
+		OS.delay_msec(10)
+	check(game.hud.is_game_over_visible(), "then the game-over dialog is shown")
+	eq(Engine.time_scale, 1.0, "and time runs normally again")
+	await tree.create_timer(1.2).timeout
 	check(king.basis.y.y < 0.2, "the mated king lies on its side (up.y = %.2f)" % king.basis.y.y)
+	check(not game.hud.is_letterboxed(), "the bars are gone")
+
+	# Undo in the middle of a new sequence cuts it short.
 	game.undo_move()
 	king = game._pieces[_sq("e1")]
 	check(king.basis.y.y > 0.99, "undo stands the king back up")
+	GameSettings.animations = true
+	game.click_square(_sq("d8"))
+	game.click_square(_sq("h4"))
+	await tree.create_timer(0.75).timeout
+	check(Engine.time_scale < 0.5, "the sequence starts again")
+	game.undo_move()
+	eq(Engine.time_scale, 1.0, "undo restores normal time at once")
+	check(not game.hud.is_announcing() and not game.camera_rig.is_in_cinematic(), "and ends the shot")
 	_close()
+	eq(Engine.time_scale, 1.0, "leaving the scene never leaves time slowed")
+
+
+func test_capture_zoom() -> void:
+	var game := _open()
+	var tree := Engine.get_main_loop() as SceneTree
+	GameSettings.animations = true
+	game.new_game("4k3/8/8/8/3q4/8/8/3RK3 w - - 0 1")
+	await tree.create_timer(1.0).timeout
+	var cam: Camera3D = game.camera_rig.camera
+	var target: Vector3 = game.board_view.to_global(Board3D.square_to_local(_sq("d4")))
+	var rest := cam.global_position.distance_to(target)
+	game.click_square(_sq("d1"))
+	game.click_square(_sq("d4"))
+	var closest := rest
+	var slowest := 1.0
+	var peak := 0.0
+	for i in 90:
+		await tree.process_frame
+		OS.delay_msec(8)
+		closest = minf(closest, cam.global_position.distance_to(target))
+		slowest = minf(slowest, Engine.time_scale)
+		peak = maxf(peak, game.camera_rig.effect_weight())
+	check(peak > 0.5, "the camera pushes in on the capture (weight %.2f)" % peak)
+	check(closest < rest - 1.0, "getting closer to the square (%.1f -> %.1f)" % [rest, closest])
+	check(slowest < 0.5, "time stalls on the blow")
+	await tree.create_timer(1.5).timeout
+	eq(Engine.time_scale, 1.0, "and resumes")
+	check(game.camera_rig.effect_weight() < 0.01, "the camera returns to its seat")
+	_close()
+
+
+func test_sword_cursor() -> void:
+	var plain := UiStyle.cursor_image(false)
+	eq(plain.get_size(), Vector2i(UiStyle.CURSOR_SIZE, UiStyle.CURSOR_SIZE), "cursor size")
+	var tip := plain.get_pixel(int(UiStyle.CURSOR_HOTSPOT.x) + 2, int(UiStyle.CURSOR_HOTSPOT.y) + 2)
+	check(tip.a > 0.5, "the blade starts at the hotspot")
+	eq(plain.get_pixel(UiStyle.CURSOR_SIZE - 2, 1).a, 0.0, "the corners are transparent")
+	var glowing := UiStyle.cursor_image(true)
+	var extra := 0
+	for y in UiStyle.CURSOR_SIZE:
+		for x in UiStyle.CURSOR_SIZE:
+			if glowing.get_pixel(x, y).a > 0.05 and plain.get_pixel(x, y).a <= 0.05:
+				extra += 1
+	check(extra > 100, "the hover cursor has a halo (%d px)" % extra)
 
 
 func test_sound_effects_are_generated() -> void:

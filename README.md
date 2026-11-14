@@ -5,7 +5,10 @@ against a built-in engine, on a 3D board with procedurally generated pieces -
 a sculpted medieval set (king with sword, queen, bishop with crosier, horse,
 brick tower, foot soldier) or classic turned pieces - that you can also swap
 for your own `.glb` models. Captures are animated: pieces are knocked flying
-or crushed, with debris, dust, camera shake and sound.
+or crushed, with debris, dust, a camera push-in and a beat of slow motion,
+and checkmate gets its own slow-motion close-up. The HUD, the mouse cursor
+(a sword) and the sound (bell, war horn, drums, steel, lute) are medieval
+too - and all of it is generated in code, without image, font or audio files.
 
 Built and tested with **Godot 4.7.2 stable** (anything from 4.4 up should
 work). No third-party addons.
@@ -27,6 +30,7 @@ whether sound effects play. Choices are remembered in `user://settings.cfg`.
 | Left click | Select a piece, then click a highlighted square to move |
 | Right drag | Orbit the camera a little |
 | Mouse wheel | Zoom (clamped) |
+| "Camera angle" slider | Tilt the view, from low and dramatic to top-down (remembered) |
 | `U` or Backspace | Undo |
 | `F` | Flip the board |
 | `Esc` | Clear the selection |
@@ -47,8 +51,11 @@ pieces/   PieceProfiles (the shape data), MeshBuilder, ProceduralPieceFactory
           (classic set), MedievalPieceFactory (sculpted set), PieceSet (Resource),
           MaterialPresets
 scenes/   Board3D, Piece3D (move / capture animations), Effects (debris, dust,
-          flashes), Sfx (synthesized sounds), CameraRig, Stage, game scene
-ui/       Main menu, HUD (move list, captured pieces, promotion picker, game over)
+          flashes), Sfx (synthesized sounds), CameraRig (angle, push-in,
+          cinematic shot), Stage, game scene
+ui/       UiStyle (the medieval look: panels, fonts, theme, sword cursor), main
+          menu, HUD (move list, captured pieces, camera angle, promotion
+          picker, game over, the cinematic layer)
 tools/    Blender export script, glTF exporter, screenshot helper
 tests/    Headless test runner and suites
 ```
@@ -86,8 +93,10 @@ What is covered:
   click-to-move, the promotion picker, undo, the game-over dialog, the menu,
   presets and `.glb` piece sets.
 - The polish: capture animations (knock / crush) and their debris, the
-  selection lift, the drop-in at the start of a game, the mated king
-  toppling, camera shake and the generated sounds.
+  camera push-in and slow motion of a capture, the whole checkmate sequence
+  (and cutting it short with undo), the camera-angle setting, the selection
+  lift, the drop-in at the start of a game, camera shake, the generated
+  sounds and the sword cursor.
 
 ## The medieval set
 
@@ -116,11 +125,45 @@ triplanar noise texture - no UVs or image files needed. From code:
 - The selected piece rises off its square, a king in check trembles, a mated
   king falls over, a promotion flashes, and the pieces drop onto the board at
   the start of a game.
-- **Sounds** (move, capture, check, promotion, game over) are synthesized in
-  [`scenes/sfx.gd`](scenes/sfx.gd), so there are no audio files; turn them
-  off with "Sound effects" in the menu.
+- **The camera joins in**: on a capture it pushes in on the square, the
+  picture flashes and time stalls for an instant - harder for a queen than
+  for a pawn (`CameraRig.punch_in`, `Hud.impact_flash`).
+- **Checkmate** is a small film: time drops to slow motion, black bars slide
+  in, the camera flies to a low, circling close-up of the king as he falls,
+  "Checkmate" slams onto the screen, and then the result dialog unrolls and
+  the view is handed back (`_play_checkmate` in `scenes/game.gd`,
+  `CameraRig.cinematic`). Undo or New game cuts it short.
 
 `GameSettings.animations = false` makes everything instant.
+
+### Sound
+
+[`scenes/sfx.gd`](scenes/sfx.gd) synthesizes every sound from a handful of
+voices - a struck blade (inharmonic partials), a cast bell (hum, prime,
+tierce, quint, nominal), a skin drum, a war horn, a plucked gut string
+(Karplus-Strong) and wood - mixed through a small "stone hall" reverb:
+
+| Event | Sound |
+| --- | --- |
+| Lifting / setting down a piece | a muted string / a heavy knock on oak |
+| Capture | steel on steel, a drum blow, rubble |
+| Check | one stroke of a church bell |
+| Promotion | a rising lute flourish |
+| New game | two drum strokes and a horn call |
+| Checkmate | war drums, a tolling bell and a horn fanfare |
+| Draw / stalemate | a falling lute phrase and a far bell |
+
+They are generated on a worker thread at startup (about a second), and
+"Sound effects" in the menu turns them off.
+
+### HUD and cursor
+
+[`ui/ui_style.gd`](ui/ui_style.gd) holds the whole look: leather panels with
+a gilt frame and corner studs, serif text in parchment and gold (titles use a
+blackletter face such as Old English Text when the system has one),
+diamond dividers, a gold-studded switch and slider - and the mouse cursor, a
+sword drawn pixel by pixel that glows over anything a click would act on.
+The cursor is only swapped while the game scene is open.
 
 ## Tweaking the classic pieces
 

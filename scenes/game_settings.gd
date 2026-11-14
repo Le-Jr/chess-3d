@@ -21,6 +21,9 @@ static var material_preset: int = MaterialPresets.Preset.ANTIQUE_METAL
 ## Path of the piece set to use (.tres PieceSet or .glb); "" = the classic
 ## procedural set, PieceSet.BUILTIN_MEDIEVAL = the sculpted medieval set.
 static var piece_set_path: String = PieceSet.BUILTIN_MEDIEVAL
+## Camera angle in degrees above the horizontal (90 = straight down); set
+## with the slider in the HUD.
+static var camera_pitch: float = 50.0
 ## Sound effects (generated in code, see Sfx).
 static var sound: bool = true
 ## Hot-seat: swing the camera to the other side after every move.
@@ -80,6 +83,7 @@ static func save() -> void:
 	cfg.set_value("game", "ai_level", ai_level)
 	cfg.set_value("game", "auto_rotate_camera", auto_rotate_camera)
 	cfg.set_value("game", "sound", sound)
+	cfg.set_value("look", "camera_pitch", camera_pitch)
 	cfg.set_value("look", "version", LOOK_VERSION)
 	cfg.set_value("look", "material_preset", material_preset)
 	cfg.set_value("look", "piece_set_path", piece_set_path)
@@ -98,6 +102,8 @@ static func load_saved() -> void:
 	material_preset = clampi(cfg.get_value("look", "material_preset", 0), 0, MaterialPresets.preset_count() - 1)
 	piece_set_path = str(cfg.get_value("look", "piece_set_path", ""))
 	sound = bool(cfg.get_value("game", "sound", true))
+	camera_pitch = clampf(float(cfg.get_value("look", "camera_pitch", 50.0)),
+			CameraRig.SETTING_MIN_PITCH, CameraRig.SETTING_MAX_PITCH)
 	# Settings saved before the medieval set existed: switch to the new look
 	# once (it can be changed back in the menu).
 	if int(cfg.get_value("look", "version", 1)) < LOOK_VERSION and piece_set_path == "":

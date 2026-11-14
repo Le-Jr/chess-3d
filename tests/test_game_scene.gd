@@ -510,6 +510,125 @@ func test_camera_shake_settles() -> void:
 	_close()
 
 
+func test_layout_modes_and_ui_scale() -> void:
+	eq(UiLayout.mode_for(Vector2(1280, 800), false), int(UiLayout.Mode.WIDE), "desktop window")
+	eq(UiLayout.mode_for(Vector2(2400, 1080), true), int(UiLayout.Mode.COMPACT), "phone held sideways")
+	eq(UiLayout.mode_for(Vector2(1080, 2400), true), int(UiLayout.Mode.PORTRAIT), "phone held upright")
+	eq(UiLayout.mode_for(Vector2(600, 900), false), int(UiLayout.Mode.PORTRAIT), "a tall desktop window too")
+	var base := Vector2(1280, 800)
+	eq(UiLayout.scale_for(Vector2(1920, 1080), false, base), 1.0, "desktop UI is not enlarged")
+	# On touch screens the short side ends up 480 UI pixels, either way up.
+	for size: Vector2 in [Vector2(2400, 1080), Vector2(1080, 2400), Vector2(1280, 800)]:
+		var stretch := minf(size.x / base.x, size.y / base.y)
+		var factor := UiLayout.scale_for(size, true, base)
+		var short_ui := minf(size.x, size.y) / (stretch * factor)
+		check(absf(short_ui - 480.0) < 0.5, "%s: short side is %.0f UI px" % [size, short_ui])
+		check(factor >= 1.0, "%s: the UI only ever grows (x%.2f)" % [size, factor])
+
+
+func test_hud_rearranges_for_portrait() -> void:
+	var game := _open()
+	game.debug_play_moves("e2e4,d7d5,e4d5")
+	var hud: Hud = game.hud
+	eq(hud.layout(), int(UiLayout.Mode.WIDE), "starts in the desktop layout")
+	check(hud._panel.anchor_left == 1.0, "panel hugs the right edge")
+
+	game._on_layout(UiLayout.Mode.PORTRAIT)
+	eq(hud.layout(), int(UiLayout.Mode.PORTRAIT))
+	check(hud._panel.anchor_left == 0.0 and hud._panel.anchor_right == 1.0 and hud._panel.anchor_top == 1.0,
+			"panel spans the bottom edge")
+	eq(hud._turn_label.text, "Black to move", "the rebuilt panel shows the same state")
+	check(hud.move_list_text().contains("exd5"), "move list carried over")
+	check(hud._captured_by_white.text.begins_with(UiStyle.glyph(Piece.PAWN)), "captured pieces carried over")
+	check(not hud._undo_button.disabled, "undo still enabled")
+	check(game.camera_rig.fit_width, "the camera frames the board by the window's width")
+	eq(game.camera_rig.camera.keep_aspect, Camera3D.KEEP_WIDTH)
+	check(game.camera_rig.camera.v_offset < -0.1, "and lifts the board above the panel")
+	check(absf(game.camera_rig.camera.h_offset) < 0.001, "with no sideways shift")
+
+	# The buttons of the rebuilt panel still work.
+	hud._undo_button.pressed.emit()
+	eq(game.state.ply_count(), 2, "undo from the portrait panel")
+
+	game._on_layout(UiLayout.Mode.COMPACT)
+	check(hud._panel.anchor_left == 1.0, "sideways: back to a side panel")
+	check(hud._panel.size.x < Hud.PANEL_WIDTH or hud._panel.offset_left > -(Hud.PANEL_WIDTH + Hud.PANEL_MARGIN),
+			"a narrower one")
+	check(not game.camera_rig.fit_width and game.camera_rig.camera.h_offset > 0.1, "camera shifts sideways again")
+	game._on_layout(UiLayout.Mode.WIDE)
+	eq(game.camera_rig.camera.keep_aspect, Camera3D.KEEP_HEIGHT)
+	_close()
+
+
+func _touch(game: Node, index: int, pos: Vector2, pressed: bool) -> void:
+	var event := InputEventScreenTouch.new()
+	event.index = index
+	event.position = pos
+	event.pressed = pressed
+	# Already in viewport coordinates (the headless window is not 1280 x 800).
+	game.get_viewport().push_input(event, true)
+
+
+func _drag(game: Node, index: int, from: Vector2, to: Vector2) -> void:
+	var event := InputEventScreenDrag.new()
+	event.index = index
+	event.position = to
+	event.relative = to - from
+	game.get_viewport().push_input(event, true)
+
+
+func test_touch_controls() -> void:
+	var game := _open()
+	var rig: CameraRig = game.camera_rig
+	# A tap selects, a second tap moves.
+	# (Aim at the pawn's body: from this angle its base is hidden behind the king.)
+	var e2 := _screen_pos(game, _sq("e2"), 0.4)
+	var e4 := _screen_pos(game, _sq("e4"))
+	_touch(game, 0, e2, true)
+	eq(game._selected, -1, "nothing happens until the finger lifts")
+	_touch(game, 0, e2, false)
+	eq(game._selected, _sq("e2"), "tap selects the pawn")
+	_touch(game, 0, e4, true)
+	_touch(game, 0, e4 + Vector2(3, -2), false)
+	eq(game.state.ply_count(), 1, "second tap plays the move (a little finger wobble is fine)")
+
+	# The mouse events the engine synthesizes from touches are ignored.
+	var fake := InputEventMouseButton.new()
+	fake.device = InputEvent.DEVICE_ID_EMULATION
+	fake.button_index = MOUSE_BUTTON_LEFT
+	fake.pressed = true
+	fake.position = _screen_pos(game, _sq("e7"))
+	game.get_viewport().push_input(fake, true)
+	eq(game._selected, -1, "emulated mouse click does not act a second time")
+
+	# Dragging one finger orbits the camera and is not a tap.
+	var e7 := _screen_pos(game, _sq("e7"), 0.4)
+	var yaw_before: float = rig._yaw_offset
+	_touch(game, 0, e7, true)
+	_drag(game, 0, e7, e7 + Vector2(60, 0))
+	_touch(game, 0, e7 + Vector2(60, 0), false)
+	eq(game._selected, -1, "a drag does not select the piece under it")
+	check(absf(rig._yaw_offset - yaw_before) > 5.0, "it turns the camera (%.1f deg)" % (rig._yaw_offset - yaw_before))
+
+	# Pinching zooms: fingers apart = closer, together = further.
+	var mid := Vector2(500, 400)
+	var zoom_before: float = rig._target_distance
+	_touch(game, 0, mid - Vector2(50, 0), true)
+	_touch(game, 1, mid + Vector2(50, 0), true)
+	_drag(game, 1, mid + Vector2(50, 0), mid + Vector2(52, 0))
+	_drag(game, 1, mid + Vector2(52, 0), mid + Vector2(120, 0))
+	check(rig._target_distance < zoom_before - 1.0, "spreading two fingers zooms in (%.1f -> %.1f)" % [
+			zoom_before, rig._target_distance])
+	var zoomed: float = rig._target_distance
+	_drag(game, 1, mid + Vector2(120, 0), mid + Vector2(40, 0))
+	check(rig._target_distance > zoomed + 0.5, "pinching zooms out")
+	_touch(game, 1, mid + Vector2(40, 0), false)
+	_touch(game, 0, mid - Vector2(50, 0), false)
+	eq(game._selected, -1, "lifting the fingers of a pinch is not a tap")
+	eq(game.state.ply_count(), 1, "and plays nothing")
+	_close()
+
+
 func test_auto_rotate_camera() -> void:
 	var game := _open()
 	GameSettings.auto_rotate_camera = true

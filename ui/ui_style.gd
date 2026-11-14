@@ -23,7 +23,11 @@ const PIECE_NAMES := ["", "Pawn", "Knight", "Bishop", "Rook", "Queen", "King"]
 const CURSOR_SIZE := 44
 const CURSOR_HOTSPOT := Vector2(3, 3)
 
+## Fallback for the glyphs, indexed by piece type.
+const LETTERS := ["", "P", "N", "B", "R", "Q", "K"]
+
 static var _glyph_font: SystemFont
+static var _has_glyphs := -1  # -1 = not checked yet
 static var _body_font: SystemFont
 static var _title_font: SystemFont
 static var _theme: Theme
@@ -38,7 +42,7 @@ static func body_font() -> Font:
 		_body_font = SystemFont.new()
 		_body_font.font_names = PackedStringArray([
 			"Palatino Linotype", "Book Antiqua", "Palatino", "Constantia", "Georgia",
-			"URW Palladio L", "DejaVu Serif", "serif"])
+			"URW Palladio L", "Noto Serif", "DejaVu Serif", "serif"])
 	return _body_font
 
 
@@ -59,12 +63,17 @@ static func glyph_font() -> Font:
 	if _glyph_font == null:
 		_glyph_font = SystemFont.new()
 		_glyph_font.font_names = PackedStringArray([
-			"Segoe UI Symbol", "Apple Symbols", "DejaVu Sans", "Noto Sans Symbols2", "FreeSerif"])
+			"Segoe UI Symbol", "Apple Symbols", "DejaVu Sans", "Noto Sans Symbols2", "Noto Sans Symbols",
+			"FreeSerif"])
 	return _glyph_font
 
 
+## The chess symbol for a piece type - or its letter where the device has
+## no font with chess symbols (some phones and all web browsers).
 static func glyph(type: int) -> String:
-	return GLYPHS[type]
+	if _has_glyphs == -1:
+		_has_glyphs = 1 if glyph_font().has_char("♟".unicode_at(0)) else 0
+	return GLYPHS[type] if _has_glyphs == 1 else LETTERS[type]
 
 
 # ------------------------------------------------------------------ theme ---

@@ -22,6 +22,7 @@ var _level_row: Control
 var _rotate_check: CheckButton
 var _engine_row: Control
 var _music: MenuMusic
+var _panel: PanelContainer
 
 
 func _ready() -> void:
@@ -46,6 +47,29 @@ func _ready() -> void:
 	_build_ui()
 	_refresh_preview()
 	_update_enabled()
+	UiLayout.watch(self, _on_layout)
+
+
+# Desktop and sideways phones: the panel on the left, the board beside it.
+# Upright: the board on top, the panel filling the rest (it scrolls).
+func _on_layout(mode: int) -> void:
+	if mode == UiLayout.Mode.PORTRAIT:
+		var height := get_viewport().get_visible_rect().size.y
+		var board_room := clampf(height * 0.32, 220.0, 420.0)
+		_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_panel.offset_left = 12
+		_panel.offset_right = -12
+		_panel.offset_top = board_room
+		_panel.offset_bottom = -12
+		_camera_rig.set_frame(true, 0.0, height - board_room)
+	else:
+		var margin := 12 if mode == UiLayout.Mode.COMPACT else PANEL_MARGIN
+		_panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+		_panel.offset_left = margin
+		_panel.offset_right = margin + PANEL_WIDTH
+		_panel.offset_top = margin
+		_panel.offset_bottom = -margin
+		_camera_rig.set_frame(false, -(PANEL_WIDTH + margin), 0.0)
 
 
 func _process(delta: float) -> void:
@@ -152,10 +176,23 @@ func _build_ui() -> void:
 	panel.offset_top = PANEL_MARGIN
 	panel.offset_bottom = -PANEL_MARGIN
 	layer.add_child(panel)
+	_panel = panel
 
+	# The options scroll when the window is too short for them (a phone
+	# held sideways); the Start button stays in view underneath.
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 8)
+	panel.add_child(column)
+	var scroll := ScrollContainer.new()
+	scroll.name = "Options"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(scroll)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 9)
-	panel.add_child(box)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(box)
 
 	var title := UiStyle.make_title("Chess 3D", 54)
 	box.add_child(title)
@@ -177,6 +214,8 @@ func _build_ui() -> void:
 	engine_path.add_theme_font_size_override("font_size", 13)
 	engine_path.text_changed.connect(func(text: String) -> void: GameSettings.stockfish_path = text.strip_edges())
 	_engine_row.add_child(engine_path)
+	# An external engine can only be started on a desktop.
+	_engine_row.visible = not (UiLayout.is_touch() or OS.has_feature("web"))
 	box.add_child(UiStyle.make_divider())
 	box.add_child(UiStyle.make_label("Look", 13, UiStyle.TEXT_DIM))
 	var looks := OptionButton.new()
@@ -226,19 +265,17 @@ func _build_ui() -> void:
 	music_check.toggled.connect(set_music)
 	box.add_child(music_check)
 
-	var filler := Control.new()
-	filler.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.add_child(filler)
-
 	var start := UiStyle.make_button("Start game", 22)
 	start.name = "StartButton"
 	UiStyle.style_primary(start, 26)
 	start.pressed.connect(start_game)
-	box.add_child(start)
+	column.add_child(start)
 
-	var quit := UiStyle.make_button("Quit", 15)
-	quit.pressed.connect(func() -> void: get_tree().quit())
-	box.add_child(quit)
+	# Phones and browsers have their own way out.
+	if not (OS.has_feature("mobile") or OS.has_feature("web")):
+		var quit := UiStyle.make_button("Quit", 15)
+		quit.pressed.connect(func() -> void: get_tree().quit())
+		column.add_child(quit)
 
 
 func _level_names() -> Array:

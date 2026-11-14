@@ -33,6 +33,12 @@ static func build(parent: Node) -> void:
 	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 
+	# Phones and tablets: drop the screen-space effects and use cheaper shadows.
+	var mobile := OS.has_feature("mobile") or OS.has_feature("web")
+	if mobile:
+		env.ssao_enabled = false
+		env.glow_enabled = false
+
 	var world_env := WorldEnvironment.new()
 	world_env.name = "WorldEnvironment"
 	world_env.environment = env
@@ -51,6 +57,9 @@ static func build(parent: Node) -> void:
 	sun.shadow_blur = 2.2
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_max_distance = 32.0
+	if mobile:
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+		sun.shadow_blur = 1.0
 	parent.add_child(sun)
 
 	# Cool fill from the opposite side so the shadowed faces keep their shape.

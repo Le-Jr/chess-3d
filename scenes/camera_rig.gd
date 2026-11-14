@@ -32,6 +32,14 @@ const SETTING_MAX_PITCH := 80.0
 ## Width in UI pixels of a panel covering the right edge of the screen; the
 ## view shifts left by half of it so the board stays centered in the rest.
 @export var screen_shift_px: float = 0.0
+## Same, for a panel along the bottom edge: the view shifts up.
+@export var screen_shift_y_px: float = 0.0
+## Frame the board by the window's width instead of its height (a tall,
+## portrait window), from `portrait_zoom` times further away.
+@export var fit_width: bool = false
+@export var portrait_zoom: float = 1.12
+## Touch: degrees of orbit per UI pixel dragged with one finger.
+@export var touch_sensitivity: float = 0.32
 ## Higher = snappier camera motion.
 @export var smoothing: float = 7.0
 @export var orbit_sensitivity: float = 0.28
@@ -50,6 +58,8 @@ var _yaw := 0.0
 var _pitch := 50.0
 var _dist := 14.2
 var _dragging := false
+var _touches := {}       # finger index -> position
+var _pinch_span := 0.0   # distance between two fingers at the last event
 var _shake := 0.0
 
 # The current effect shot, blended over the normal view by _fx_weight.
@@ -105,6 +115,17 @@ func set_pitch(degrees: float, animate: bool = true) -> void:
 	_target_pitch = pitch_deg
 	if not animate:
 		snap()
+
+
+## Adapts the framing to the screen layout: `portrait` frames the board by
+## the window's width; the shifts are the UI pixels covered by a panel on
+## the right (negative: on the left) and along the bottom.
+func set_frame(portrait: bool, shift_x_px: float, shift_y_px: float) -> void:
+	fit_width = portrait
+	screen_shift_px = shift_x_px
+	screen_shift_y_px = shift_y_px
+	if is_inside_tree():
+		_apply()
 
 
 ## Jumps straight to the target view (no easing).
@@ -228,6 +249,33 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Touch: one finger orbits, two fingers pinch to zoom. The mouse events
+	# the engine synthesizes from touches are ignored, so nothing counts twice.
+	if event is InputEventScreenTouch:
+		var touch := event as InputEventScreenTouch
+		if touch.pressed:
+			_touches[touch.index] = touch.position
+		else:
+			_touches.erase(touch.index)
+		_pinch_span = 0.0
+		return
+	if event is InputEventScreenDrag:
+		var drag := event as InputEventScreenDrag
+		_touches[drag.index] = drag.position
+		if _touches.size() == 1:
+			_yaw_offset = clampf(_yaw_offset - drag.relative.x * touch_sensitivity,
+					-max_yaw_offset_deg, max_yaw_offset_deg)
+			_target_pitch = clampf(_target_pitch + drag.relative.y * touch_sensitivity,
+					min_pitch_deg, max_pitch_deg)
+		elif _touches.size() >= 2:
+			var points: Array = _touches.values()
+			var span: float = (points[0] as Vector2).distance_to(points[1])
+			if _pinch_span > 1.0 and span > 1.0:
+				_target_distance = clampf(_target_distance * _pinch_span / span, min_distance, max_distance)
+			_pinch_span = span
+		return
+	if event.device == InputEvent.DEVICE_ID_EMULATION:
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_RIGHT:
@@ -248,19 +296,23 @@ func _apply() -> void:
 	var fx := _fx_weight
 	var yaw := deg_to_rad(_yaw + _fx_yaw * fx)
 	var pitch := deg_to_rad(lerpf(_pitch, _fx_pitch, fx) if _fx_pitch >= 0.0 else _pitch)
-	var dist := lerpf(_dist, _fx_dist, fx)
+	var dist := lerpf(_dist, _fx_dist, fx) * (portrait_zoom if fit_width else 1.0)
+	camera.keep_aspect = Camera3D.KEEP_WIDTH if fit_width else Camera3D.KEEP_HEIGHT
 	var dir := Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch))
 	var focus := Vector3(sin(yaw), 0.0, cos(yaw)) * focus_offset
 	focus = focus.lerp(_fx_point, fx * _fx_pull)
 	camera.transform = Transform3D(Basis.looking_at(-dir, Vector3.UP), focus + dir * dist)
 	camera.fov = fov_deg - _fx_fov * fx
-	var shift := 0.0
-	if screen_shift_px != 0.0 and is_inside_tree():
-		var view_height := get_viewport().get_visible_rect().size.y
-		var units_per_px := 2.0 * dist * tan(deg_to_rad(camera.fov) * 0.5) / maxf(view_height, 1.0)
-		shift = screen_shift_px * 0.5 * units_per_px
-	camera.h_offset = shift + randf_range(-1.0, 1.0) * _shake
-	camera.v_offset = randf_range(-1.0, 1.0) * _shake
+	var shift := Vector2.ZERO
+	if (screen_shift_px != 0.0 or screen_shift_y_px != 0.0) and is_inside_tree():
+		# The field of view spans the window's width or its height, depending
+		# on which one frames the board.
+		var view := get_viewport().get_visible_rect().size
+		var span := view.x if fit_width else view.y
+		var units_per_px := 2.0 * dist * tan(deg_to_rad(camera.fov) * 0.5) / maxf(span, 1.0)
+		shift = Vector2(screen_shift_px, -screen_shift_y_px) * 0.5 * units_per_px
+	camera.h_offset = shift.x + randf_range(-1.0, 1.0) * _shake
+	camera.v_offset = shift.y + randf_range(-1.0, 1.0) * _shake
 
 
 ## Sets the view directly (debugging / screenshots); ignores the usual clamps.

@@ -21,6 +21,10 @@ signal promotion_chosen(type: int)
 ## Width of the side panel in UI pixels (the camera shifts the board to
 ## stay centered in what is left).
 const PANEL_WIDTH := 300
+## Narrower side panel on a phone held sideways, and the strip under the
+## board on one held upright.
+const COMPACT_PANEL_WIDTH := 264
+const PORTRAIT_PANEL_HEIGHT := 292
 const LETTERBOX_HEIGHT := 78.0
 const PANEL_MARGIN := 12
 const PIECE_VALUES := [0, 1, 3, 3, 5, 9, 0]
@@ -42,6 +46,13 @@ var _game_over_title: Label
 var _game_over_detail: Label
 var _thinking := false
 
+var _panel: PanelContainer
+var _layout: int = UiLayout.Mode.WIDE
+var _last_state: GameState
+var _auto_rotate_on := false
+var _auto_rotate_available := true
+var _menu_available := true
+var _dialog_centers: Array[CenterContainer] = []
 var _camera_slider: HSlider
 var _bar_top: ColorRect
 var _bar_bottom: ColorRect
@@ -67,6 +78,7 @@ func _init() -> void:
 
 ## Updates everything in the side panel from the game state.
 func refresh(state: GameState) -> void:
+	_last_state = state
 	var white := state.side_to_move() == Piece.WHITE
 	var chip := StyleBoxFlat.new()
 	# A seal in the color of the side to move.
@@ -105,12 +117,59 @@ func set_thinking(thinking: bool, state: GameState) -> void:
 
 
 func set_auto_rotate(enabled: bool, available: bool) -> void:
+	_auto_rotate_on = enabled
+	_auto_rotate_available = available
 	_auto_rotate.set_pressed_no_signal(enabled)
 	_auto_rotate.disabled = not available
 
 
 func set_menu_available(available: bool) -> void:
+	_menu_available = available
 	_menu_button.visible = available
+
+
+## The current layout (a UiLayout.Mode).
+func layout() -> int:
+	return _layout
+
+
+## Rearranges the HUD for a layout: rebuilds the panel (beside or under the
+## board) and recenters the dialogs and the banner over what is left.
+func set_layout(mode: int) -> void:
+	if mode == _layout:
+		return
+	_layout = mode
+	var slider_value := _camera_slider.value
+	remove_child(_panel)
+	_panel.queue_free()
+	_build_side_panel(mode)
+	_camera_slider.set_value_no_signal(slider_value)
+	var inset := panel_inset(mode)
+	for center in _dialog_centers:
+		center.offset_right = -inset.x
+		center.offset_bottom = -inset.y
+	var banner_holder: Control = _banner.get_parent().get_parent()
+	banner_holder.offset_right = -inset.x
+	banner_holder.offset_bottom = -(inset.y + (120.0 if mode == UiLayout.Mode.PORTRAIT else 260.0))
+	_banner.add_theme_font_size_override("font_size", 104 if mode == UiLayout.Mode.WIDE else 62)
+	_banner_sub.add_theme_font_size_override("font_size", 26 if mode == UiLayout.Mode.WIDE else 18)
+	_game_over_title.add_theme_font_size_override("font_size", 54 if mode == UiLayout.Mode.WIDE else 40)
+	_game_over_title.custom_minimum_size.x = 380.0 if mode == UiLayout.Mode.WIDE else 300.0
+	for b in _promotion_buttons:
+		b.custom_minimum_size = Vector2(88, 88) if mode == UiLayout.Mode.WIDE else Vector2(72, 72)
+	if _last_state != null:
+		refresh(_last_state)
+
+
+## Screen space the panel takes, in UI pixels: (from the right edge, from the
+## bottom edge). The camera shifts the board by half of it.
+static func panel_inset(mode: int) -> Vector2:
+	match mode:
+		UiLayout.Mode.PORTRAIT:
+			return Vector2(0.0, PORTRAIT_PANEL_HEIGHT + PANEL_MARGIN)
+		UiLayout.Mode.COMPACT:
+			return Vector2(COMPACT_PANEL_WIDTH + PANEL_MARGIN, 0.0)
+	return Vector2(PANEL_WIDTH + PANEL_MARGIN, 0.0)
 
 
 ## Opens the promotion picker for `color`; answers with `promotion_chosen`.
@@ -322,38 +381,58 @@ func _captured_text(state: GameState, by: int) -> String:
 
 # --------------------------------------------------------------- building ---
 
-func _build_side_panel() -> void:
-	var panel := PanelContainer.new()
-	panel.name = "SidePanel"
-	panel.theme = UiStyle.theme()
-	panel.add_theme_stylebox_override("panel", UiStyle.panel())
-	UiStyle.decorate(panel)
-	panel.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
-	panel.offset_left = -(PANEL_WIDTH + PANEL_MARGIN)
-	panel.offset_right = -PANEL_MARGIN
-	panel.offset_top = PANEL_MARGIN
-	panel.offset_bottom = -PANEL_MARGIN
-	add_child(panel)
+# Builds the panel for a layout: a full side panel (WIDE), a denser one for
+# a phone held sideways (COMPACT), or a strip under the board (PORTRAIT).
+func _build_side_panel(mode: int = UiLayout.Mode.WIDE) -> void:
+	var portrait := mode == UiLayout.Mode.PORTRAIT
+	var compact := mode != UiLayout.Mode.WIDE
+	_panel = PanelContainer.new()
+	_panel.name = "SidePanel"
+	_panel.theme = UiStyle.theme()
+	_panel.add_theme_stylebox_override("panel", UiStyle.panel(6, 8 if compact else 16))
+	UiStyle.decorate(_panel)
+	if portrait:
+		_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		_panel.offset_left = PANEL_MARGIN
+		_panel.offset_right = -PANEL_MARGIN
+		_panel.offset_top = -(PORTRAIT_PANEL_HEIGHT + PANEL_MARGIN)
+		_panel.offset_bottom = -PANEL_MARGIN
+	else:
+		_panel.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+		_panel.offset_left = -(panel_inset(mode).x)
+		_panel.offset_right = -PANEL_MARGIN
+		_panel.offset_top = PANEL_MARGIN
+		_panel.offset_bottom = -PANEL_MARGIN
+	add_child(_panel)
+	# Under the dialogs, which were added first.
+	move_child(_panel, _flash.get_index() + 3)
 
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
-	panel.add_child(box)
+	box.add_theme_constant_override("separation", 5 if compact else 8)
+	_panel.add_child(box)
 
 	var turn_row := HBoxContainer.new()
 	turn_row.add_theme_constant_override("separation", 10)
 	box.add_child(turn_row)
 	_turn_chip = Panel.new()
-	_turn_chip.custom_minimum_size = Vector2(26, 26)
+	_turn_chip.custom_minimum_size = Vector2(22, 22) if compact else Vector2(26, 26)
 	_turn_chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	turn_row.add_child(_turn_chip)
-	_turn_label = UiStyle.make_title("White to move", 24)
+	_turn_label = UiStyle.make_title("White to move", 20 if compact else 24)
 	turn_row.add_child(_turn_label)
 
 	_status_label = UiStyle.make_label("", 14, UiStyle.TEXT_DIM)
-	box.add_child(_status_label)
-	box.add_child(UiStyle.make_divider())
+	if portrait:
+		# Beside the turn, to save a line.
+		_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		turn_row.add_child(_status_label)
+	else:
+		box.add_child(_status_label)
+	if not compact:
+		box.add_child(UiStyle.make_divider())
+		box.add_child(UiStyle.make_heading("Chronicle"))
 
-	box.add_child(UiStyle.make_heading("Chronicle"))
 	_moves = RichTextLabel.new()
 	_moves.add_theme_font_override("normal_font", UiStyle.body_font())
 	_moves.add_theme_font_override("italics_font", UiStyle.body_font())
@@ -364,21 +443,33 @@ func _build_side_panel() -> void:
 	_moves.bbcode_enabled = true
 	_moves.scroll_following = true
 	_moves.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_moves.custom_minimum_size = Vector2(0, 44)
 	_moves.add_theme_font_size_override("normal_font_size", 15)
 	_moves.add_theme_font_size_override("bold_font_size", 15)
 	_moves.add_theme_color_override("default_color", UiStyle.TEXT)
 	box.add_child(_moves)
-	box.add_child(UiStyle.make_divider())
 
-	box.add_child(UiStyle.make_heading("Fallen"))
-	_captured_by_white = _make_captured_label(Color(0.16, 0.16, 0.18), Color(0.8, 0.8, 0.8))
-	_captured_by_black = _make_captured_label(Color(0.96, 0.95, 0.9), Color(0.25, 0.25, 0.27))
-	box.add_child(_captured_by_white)
-	box.add_child(_captured_by_black)
-	box.add_child(UiStyle.make_divider())
+	_captured_by_white = _make_captured_label(Color(0.16, 0.16, 0.18), Color(0.8, 0.8, 0.8), compact)
+	_captured_by_black = _make_captured_label(Color(0.96, 0.95, 0.9), Color(0.25, 0.25, 0.27), compact)
+	if portrait:
+		# Side by side.
+		var fallen := HBoxContainer.new()
+		fallen.add_theme_constant_override("separation", 10)
+		box.add_child(fallen)
+		for label: Label in [_captured_by_white, _captured_by_black]:
+			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			fallen.add_child(label)
+	else:
+		if not compact:
+			box.add_child(UiStyle.make_divider())
+			box.add_child(UiStyle.make_heading("Fallen"))
+		box.add_child(_captured_by_white)
+		box.add_child(_captured_by_black)
+		if not compact:
+			box.add_child(UiStyle.make_divider())
+			box.add_child(UiStyle.make_heading("Camera angle"))
 
 	# Camera angle: from a low, dramatic view to almost straight down.
-	box.add_child(UiStyle.make_heading("Camera angle"))
 	_camera_slider = HSlider.new()
 	_camera_slider.name = "CameraAngle"
 	_camera_slider.min_value = CameraRig.SETTING_MIN_PITCH
@@ -386,37 +477,53 @@ func _build_side_panel() -> void:
 	_camera_slider.step = 1.0
 	_camera_slider.value = GameSettings.camera_pitch
 	_camera_slider.focus_mode = Control.FOCUS_NONE
-	_camera_slider.tooltip_text = "Low and dramatic  <->  top-down"
+	_camera_slider.custom_minimum_size = Vector2(0, 22)
+	_camera_slider.tooltip_text = "Camera angle: low and dramatic  <->  top-down"
 	_camera_slider.value_changed.connect(func(v: float) -> void: camera_pitch_changed.emit(v))
 	_camera_slider.drag_ended.connect(func(_changed: bool) -> void: camera_pitch_committed.emit())
-	box.add_child(_camera_slider)
 
 	_auto_rotate = CheckButton.new()
-	_auto_rotate.text = "Rotate board each turn"
+	_auto_rotate.text = "Rotate each turn" if compact else "Rotate board each turn"
 	_auto_rotate.add_theme_font_size_override("font_size", 14)
 	_auto_rotate.focus_mode = Control.FOCUS_NONE
+	_auto_rotate.set_pressed_no_signal(_auto_rotate_on)
+	_auto_rotate.disabled = not _auto_rotate_available
 	_auto_rotate.toggled.connect(func(on: bool) -> void: auto_rotate_toggled.emit(on))
-	box.add_child(_auto_rotate)
+
+	if portrait:
+		# Slider and switch share a line.
+		var camera_row := HBoxContainer.new()
+		camera_row.add_theme_constant_override("separation", 12)
+		box.add_child(camera_row)
+		camera_row.add_child(UiStyle.make_label("Angle", 13, UiStyle.TEXT_DIM))
+		_camera_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_camera_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		camera_row.add_child(_camera_slider)
+		camera_row.add_child(_auto_rotate)
+	else:
+		box.add_child(_camera_slider)
+		box.add_child(_auto_rotate)
 
 	var buttons := GridContainer.new()
-	buttons.columns = 2
-	buttons.add_theme_constant_override("h_separation", 8)
-	buttons.add_theme_constant_override("v_separation", 8)
+	buttons.columns = 4 if portrait else 2
+	buttons.add_theme_constant_override("h_separation", 6 if compact else 8)
+	buttons.add_theme_constant_override("v_separation", 6 if compact else 8)
 	box.add_child(buttons)
 	_undo_button = _add_button(buttons, "Undo", func() -> void: undo_requested.emit())
-	_add_button(buttons, "Flip board", func() -> void: flip_requested.emit())
-	_add_button(buttons, "New game", func() -> void: new_game_requested.emit())
+	_add_button(buttons, "Flip" if portrait else "Flip board", func() -> void: flip_requested.emit())
+	_add_button(buttons, "New" if portrait else "New game", func() -> void: new_game_requested.emit())
 	_menu_button = _add_button(buttons, "Menu", func() -> void: menu_requested.emit())
+	_menu_button.visible = _menu_available
 
 
-func _make_captured_label(color: Color, outline: Color) -> Label:
+func _make_captured_label(color: Color, outline: Color, small: bool = false) -> Label:
 	var l := Label.new()
 	l.add_theme_font_override("font", UiStyle.glyph_font())
-	l.add_theme_font_size_override("font_size", 24)
+	l.add_theme_font_size_override("font_size", 19 if small else 24)
 	l.add_theme_color_override("font_color", color)
 	l.add_theme_color_override("font_outline_color", outline)
 	l.add_theme_constant_override("outline_size", 3)
-	l.custom_minimum_size = Vector2(0, 32)
+	l.custom_minimum_size = Vector2(0, 25 if small else 32)
 	l.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	return l
 
@@ -452,6 +559,7 @@ func _make_dialog(overlay: Control) -> VBoxContainer:
 	center.offset_right = -(PANEL_WIDTH + PANEL_MARGIN)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.add_child(center)
+	_dialog_centers.append(center)
 	var panel := PanelContainer.new()
 	panel.theme = UiStyle.theme()
 	var style := UiStyle.panel(6, 26)

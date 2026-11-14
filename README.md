@@ -40,6 +40,42 @@ move and a king in check are highlighted. In hot-seat the camera swings to
 the other side after each move - turn that off with "Rotate board each turn".
 Against the computer, Undo takes back your move and the reply.
 
+## Mobile port (branch `mobile-port`)
+
+This branch adapts the game to phones and tablets; `main` stays the desktop
+version.
+
+- **Responsive layout** ([`ui/ui_layout.gd`](ui/ui_layout.gd)). Upright, the
+  board is framed by the screen's width and the HUD becomes a strip under
+  it; sideways, the side panel gets narrower and denser. The menu puts the
+  board on top and keeps "Start game" in view while the options scroll. It
+  follows the window, so rotating the device (or resizing a desktop window
+  until it is taller than wide) switches layout on the fly.
+- **Finger-sized UI.** On touch devices the interface is scaled so the
+  short side of the screen is about 420-760 density-independent pixels.
+- **Touch controls.** Tap a piece, then tap a square; drag one finger to
+  orbit the camera; pinch to zoom. A drag or a pinch never counts as a tap.
+- **Lighter rendering** on mobile and web: no SSAO or glow, cheaper shadows.
+- Chess symbols fall back to letters (P N B R Q K) where the device has no
+  font with them; the Stockfish field and Quit button are hidden.
+
+Try it on a desktop with a phone-shaped window:
+
+```
+godot --path . --resolution 520x1100 -- --touch     # upright
+godot --path . --resolution 1100x520 -- --touch     # sideways
+```
+
+To build for Android: install the Android export templates and SDK in the
+editor (Editor Settings -> Export -> Android), add an Android preset in
+Project -> Export, and export an APK / AAB. The project already allows both
+orientations (`display/window/handheld/orientation = sensor`) and uses the
+Mobile renderer there.
+
+**Not verified yet:** this was developed and tested on a desktop with
+phone-sized windows and synthetic touch events; it has not been run on a
+real device, and no Android / iOS / web build has been made.
+
 ## Project layout
 
 ```
@@ -53,7 +89,8 @@ pieces/   PieceProfiles (the shape data), MeshBuilder, ProceduralPieceFactory
 scenes/   Board3D, Piece3D (move / capture animations), Effects (debris, dust,
           flashes), Sfx (synthesized sounds), CameraRig (angle, push-in,
           cinematic shot), Stage, game scene
-ui/       UiStyle (the medieval look: panels, fonts, theme, sword cursor), main
+ui/       UiLayout (responsive layout and touch scaling, see "Mobile port"),
+          UiStyle (the medieval look: panels, fonts, theme, sword cursor), main
           menu, HUD (move list, captured pieces, camera angle, promotion
           picker, game over, the cinematic layer)
 tools/    Blender export script, glTF exporter, screenshot helper

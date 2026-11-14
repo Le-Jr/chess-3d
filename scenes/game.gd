@@ -22,6 +22,12 @@ var _ai := AiPlayer.new()
 var _cinematic: Tween  # the checkmate sequence, while it plays
 var _slow_token := 0
 var _hover_shape := Input.CURSOR_ARROW
+var _tap_index := -1          # finger that may still become a tap
+var _tap_start := Vector2.ZERO
+var _fingers := 0
+
+## A touch that moves further than this (UI pixels) is a drag, not a tap.
+const TAP_SLOP := 14.0
 
 
 func _ready() -> void:
@@ -55,6 +61,7 @@ func _ready() -> void:
 	hud.camera_pitch_committed.connect(GameSettings.save)
 	hud.set_camera_pitch(GameSettings.camera_pitch)
 	UiStyle.set_sword_cursor(true)
+	UiLayout.watch(self, _on_layout)
 	hud.set_menu_available(ResourceLoader.exists(MAIN_MENU_SCENE))
 	_ai.move_ready.connect(_on_ai_move_ready)
 
@@ -66,6 +73,28 @@ func _ready() -> void:
 # ------------------------------------------------------------------ input ---
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Touch: a tap acts on the square under the finger when it is lifted,
+	# unless the finger was dragged (that orbits the camera) or a second
+	# finger joined (a pinch). Mouse events synthesized from touches are
+	# skipped so a tap is not handled twice.
+	if event is InputEventScreenTouch:
+		var touch := event as InputEventScreenTouch
+		if touch.pressed:
+			_fingers += 1
+			_tap_index = touch.index if _fingers == 1 else -1
+			_tap_start = touch.position
+		else:
+			_fingers = maxi(_fingers - 1, 0)
+			if touch.index == _tap_index and touch.position.distance_to(_tap_start) <= TAP_SLOP:
+				click_square(board_view.pick_square(camera_rig.camera, touch.position, state.board))
+			_tap_index = -1
+		return
+	if event is InputEventScreenDrag:
+		if (event as InputEventScreenDrag).position.distance_to(_tap_start) > TAP_SLOP:
+			_tap_index = -1
+		return
+	if event.device == InputEvent.DEVICE_ID_EMULATION:
+		return
 	if event is InputEventMouseMotion:
 		_update_hover((event as InputEventMouseMotion).position)
 	elif event is InputEventMouseButton:
@@ -98,6 +127,13 @@ func _update_hover(screen_pos: Vector2) -> void:
 	if shape != _hover_shape:
 		_hover_shape = shape
 		Input.set_default_cursor_shape(shape)
+
+
+# The window was resized or rotated: rearrange the HUD and reframe the board.
+func _on_layout(mode: int) -> void:
+	hud.set_layout(mode)
+	var inset := Hud.panel_inset(mode)
+	camera_rig.set_frame(mode == UiLayout.Mode.PORTRAIT, inset.x, inset.y)
 
 
 func _on_camera_pitch_changed(degrees: float) -> void:

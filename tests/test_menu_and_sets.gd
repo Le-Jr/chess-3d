@@ -216,6 +216,17 @@ func test_main_menu() -> void:
 	(Engine.get_main_loop() as SceneTree).root.add_child(menu)
 	eq(menu._preview_pieces.size(), 32, "preview shows the full set")
 	check(menu._music is MenuMusic, "the menu has its music player")
+	# Upright, the panel fills the lower part of the screen and the Start
+	# button stays outside the scrolling options.
+	menu._on_layout(UiLayout.Mode.PORTRAIT)
+	check(menu._panel.anchor_right == 1.0 and menu._panel.offset_top > 100.0, "portrait: panel under the board")
+	check(menu._camera_rig.fit_width, "portrait: preview framed by width")
+	var start: Node = menu._panel.find_child("StartButton", true, false)
+	check(start != null and not (start.get_parent() is ScrollContainer)
+			and menu._panel.find_child("Options", true, false) is ScrollContainer,
+			"Start sits below the scrolling options")
+	menu._on_layout(UiLayout.Mode.WIDE)
+	check(menu._panel.anchor_right == 0.0 and not menu._camera_rig.fit_width, "wide: panel on the left again")
 	menu.set_music(false)
 	eq(GameSettings.music, false, "music can be switched off")
 	menu.set_music(true)

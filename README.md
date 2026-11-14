@@ -21,7 +21,7 @@ work). No third-party addons.
 The main menu lets you pick the mode (two players / vs computer), your color,
 the difficulty, the look (antique metal, carved stone, classic wood, marble,
 stylized flat), the piece set (medieval or classic, plus any you add) and
-whether sound effects play. Choices are remembered in `user://settings.cfg`.
+whether sound effects and the menu music play. Choices are remembered in `user://settings.cfg`.
 
 ### Controls
 
@@ -155,6 +155,18 @@ tierce, quint, nominal), a skin drum, a war horn, a plucked gut string
 
 They are generated on a worker thread at startup (about a second), and
 "Sound effects" in the menu turns them off.
+
+### Menu music
+
+The main menu plays a looping piece for lute, wooden flute, a hurdy-gurdy
+drone and a tabor (16 bars in D dorian), composed and synthesized in
+[`scenes/menu_music.gd`](scenes/menu_music.gd) - the tune is a list of notes
+at the top of the file. The first launch takes a few seconds to render it
+(in the background; the music fades in when ready), after which it is cached
+in `user://menu_music_v1.pcm`. "Menu music" in the menu turns it off.
+
+**Your own track:** put `menu_music.ogg`, `.mp3` or `.wav` in `audio/`
+(or in `user://audio/`) and it is looped in place of the generated piece.
 
 ### HUD and cursor
 

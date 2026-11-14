@@ -15,6 +15,7 @@ func _reset_settings() -> void:
 	GameSettings.auto_rotate_camera = true
 	GameSettings.animations = true
 	GameSettings.sound = true
+	GameSettings.music = true
 	GameSettings.stockfish_path = ""
 
 
@@ -49,6 +50,7 @@ func test_settings_round_trip() -> void:
 	GameSettings.piece_set_path = "user://piece_sets/mine.glb"
 	GameSettings.auto_rotate_camera = false
 	GameSettings.sound = false
+	GameSettings.music = false
 	GameSettings.save()
 	_reset_settings()
 	GameSettings.load_saved()
@@ -59,6 +61,7 @@ func test_settings_round_trip() -> void:
 	eq(GameSettings.piece_set_path, "user://piece_sets/mine.glb", "piece set saved")
 	eq(GameSettings.auto_rotate_camera, false, "auto-rotate saved")
 	eq(GameSettings.sound, false, "sound toggle saved")
+	eq(GameSettings.music, false, "music toggle saved")
 
 	# The classic set stays selected once it has been saved with this version...
 	GameSettings.piece_set_path = ""
@@ -167,6 +170,40 @@ func test_game_uses_selected_set_and_preset() -> void:
 	_reset_settings()
 
 
+func test_menu_music_loops_seamlessly() -> void:
+	# Two bars are enough to check the machinery (the full piece takes seconds).
+	var samples := MenuMusic.compose(2)
+	eq(samples.size(), int(2 * 4 * MenuMusic.BEAT * MenuMusic.MIX_RATE), "two bars long")
+	eq(samples.size() * 2, MenuMusic.expected_bytes(2), "matches the cache size check")
+	var peak := 0.0
+	var biggest_step := 0.0
+	for i in samples.size():
+		peak = maxf(peak, absf(samples[i]))
+		if i > 0:
+			biggest_step = maxf(biggest_step, absf(samples[i] - samples[i - 1]))
+	check(peak > 0.5 and peak <= 1.0, "audible and not clipped (peak %.2f)" % peak)
+	# The jump from the last sample back to the first must be no bigger than
+	# the steps inside the piece, or the loop would click.
+	var seam := absf(samples[0] - samples[samples.size() - 1])
+	check(seam <= biggest_step, "no click at the loop point (seam %.3f, largest step %.3f)" % [seam, biggest_step])
+	# Notes that ring past the end are folded onto the start, so it is not silent.
+	var head := 0.0
+	for i in 2000:
+		head = maxf(head, absf(samples[i]))
+	check(head > 0.02, "the opening carries the tail of the ending")
+
+	var stream := MenuMusic.make_stream(MenuMusic._to_pcm(samples))
+	eq(stream.loop_mode, AudioStreamWAV.LOOP_FORWARD, "stream loops")
+	eq(stream.loop_end, samples.size(), "over its whole length")
+	# Every bar of the full piece is written out: 8 eighths each.
+	for tune: Array in [MenuMusic.LUTE_TUNE, MenuMusic.FLUTE_TUNE]:
+		var eighths := 0
+		for i in range(1, tune.size(), 2):
+			eighths += tune[i]
+		eq(eighths, 8 * 8, "a tune fills eight bars")
+	eq(MenuMusic.HARMONY.size(), MenuMusic.BARS, "one chord per bar")
+
+
 func test_main_menu() -> void:
 	_reset_settings()
 	var backup := ""
@@ -178,6 +215,10 @@ func test_main_menu() -> void:
 	var menu := packed.instantiate()
 	(Engine.get_main_loop() as SceneTree).root.add_child(menu)
 	eq(menu._preview_pieces.size(), 32, "preview shows the full set")
+	check(menu._music is MenuMusic, "the menu has its music player")
+	menu.set_music(false)
+	eq(GameSettings.music, false, "music can be switched off")
+	menu.set_music(true)
 	check(menu._color_buttons[0].disabled, "color choice disabled in hot-seat")
 
 	menu.set_mode(1)

@@ -21,6 +21,7 @@ var _color_row: Control
 var _level_row: Control
 var _rotate_check: CheckButton
 var _engine_row: Control
+var _music: MenuMusic
 
 
 func _ready() -> void:
@@ -37,6 +38,10 @@ func _ready() -> void:
 	_camera_rig.set_process(false)
 	_camera_rig.set_process_unhandled_input(false)
 	add_child(_camera_rig)
+
+	_music = MenuMusic.new()
+	_music.name = "MenuMusic"
+	add_child(_music)
 
 	_build_ui()
 	_refresh_preview()
@@ -89,6 +94,11 @@ func set_preset(index: int) -> void:
 func set_piece_set(index: int) -> void:
 	GameSettings.piece_set_path = _piece_sets[index]["path"]
 	_refresh_preview()
+
+
+func set_music(on: bool) -> void:
+	GameSettings.music = on
+	_music.set_enabled(on)
 
 
 func _update_enabled() -> void:
@@ -206,6 +216,15 @@ func _build_ui() -> void:
 	sound_check.focus_mode = Control.FOCUS_NONE
 	sound_check.toggled.connect(func(on: bool) -> void: GameSettings.sound = on)
 	box.add_child(sound_check)
+
+	var music_check := CheckButton.new()
+	music_check.name = "MusicCheck"
+	music_check.text = "Menu music"
+	music_check.button_pressed = GameSettings.music
+	music_check.add_theme_font_size_override("font_size", 14)
+	music_check.focus_mode = Control.FOCUS_NONE
+	music_check.toggled.connect(set_music)
+	box.add_child(music_check)
 
 	var filler := Control.new()
 	filler.size_flags_vertical = Control.SIZE_EXPAND_FILL

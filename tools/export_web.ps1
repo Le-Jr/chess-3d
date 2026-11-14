@@ -13,6 +13,8 @@ param(
 $project = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $project "build\web"
 New-Item -ItemType Directory -Force $out | Out-Null
+# Keep the editor from importing the exported files as project resources.
+New-Item -ItemType File -Force (Join-Path $project "build\.gdignore") | Out-Null
 
 & $Godot --headless --path $project --import | Out-Null
 & $Godot --headless --path $project --export-release "Web" (Join-Path $out "index.html")

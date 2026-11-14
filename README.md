@@ -68,6 +68,10 @@ godot --path . --resolution 1100x520 -- --touch     # sideways
 
 ### Web build
 
+Playable at **https://le-jr.github.io/chess-3d/** (GitHub Pages, served from
+the `gh-pages` branch, which holds nothing but the contents of `build/web`
+plus an empty `.nojekyll`; to update it, export and push that folder there).
+
 ```powershell
 .\tools\export_web.ps1 -Serve        # exports to build/web and serves http://localhost:8060
 ```
@@ -87,7 +91,9 @@ How the build is set up, and why:
   Headers", which makes that work on hosts where you cannot set headers
   (GitHub Pages, itch.io without the SharedArrayBuffer option) at the cost
   of one automatic reload on the first visit. `tools/serve_web.py` sends the
-  headers itself. If you export with threads off instead, the game still
+  headers itself. A small script in the page's head (see `html/head_include`
+  in the preset) reloads until the worker has taken control, since the
+  stock reload sometimes lands before it has. If you export with threads off instead, the game still
   works but the picture stalls while the computer thinks and while the
   sounds are generated at startup.
 - **Fonts are bundled** (`fonts/`: EB Garamond, Cinzel, Noto Sans Symbols 2,
